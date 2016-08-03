@@ -1,2 +1,3 @@
-# CloudVisionPortal-Examples
-A collection of CloudVision Portal examples and best practices  
+# Arista Cloudvision&reg; Portal Examples
+This repository is a collection of examples and best practices for
+CloudVision&reg; Portal.
