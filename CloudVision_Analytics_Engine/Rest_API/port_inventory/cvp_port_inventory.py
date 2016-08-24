@@ -43,7 +43,7 @@
        Engine.
     2) There is a long delay between printing the header and the first line
        of data. The delay is the result of collecting and processing the
-       vlan information from the switch.
+       VLAN information from the switch.
     3) There is a delay between printing each switch entry. This is because
        we are collecting the LLDP information for the port.
     4) Sometimes a MAC address will be printed as '(Invalid MAC address)'.
@@ -72,7 +72,7 @@ from cvp_client_errors import CvpApiError, CvpRequestError
 CVP_HOST = 'cvpdev'
 # Timeout for RESTful API Requests
 TIMEOUT = 60
-# Delimeter string to use between fields in output
+# Delimiter string to use between fields in output
 DELIM = ' ^ '
 
 # Script Variables
