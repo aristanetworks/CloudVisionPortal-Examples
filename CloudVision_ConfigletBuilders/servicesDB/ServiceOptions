@@ -1,0 +1,60 @@
+import json
+import re
+from cvplibrary import Form, CVPGlobalVariables, GlobalVariableNames
+
+# Dummy Service Data Base location
+filename = "/home/cvp/servicesDb.json"
+
+# Get focus on a switch for testing
+#CVPGlobalVariables.setNetElement( "00:50:56:3e:bf:5d" )
+#CVPGlobalVariables.setNetElement( "00:50:56:fd:bd:51" )
+
+#Import service db for switch info
+with open(filename, 'r') as fp:
+    db = json.load(fp)
+
+# Get the list of services to be processed
+services = re.split(',',Form.getFieldById('serviceList').getValue())
+# Get required action (add, remove, update)
+action = Form.getFieldById('action').getValue()
+# Get which interface the service are for
+interface = Form.getFieldById('interface').getValue()
+
+
+# Build simple config example
+print "! Services Configlet Builder start"
+print '!'
+
+if len(services) == 0:
+  print "No Services selected"
+else:
+  if action == "add":
+    for service in services:
+      if service in db:
+        vlan = db[service]['vlan']
+        vlanName = db[service]['name']
+        print "vlan %s" % vlan
+        print "name %s-Service" % vlanName
+        print "exit"
+        print "interface %s" % interface
+        print "switchport trunk allowed vlan add %s" %vlan
+        print "exit"
+      
+  elif action == "update":
+    for service in services:
+      if service in db:
+        vlan = db[service]['vlan']
+        print "interface %s" % interface
+        print "switchport trunk allowed vlan add %s" %vlan
+        print "exit"
+        
+  elif action == "remove":
+    for service in services:
+      if service in db:
+        vlan = db[service]['vlan']
+        print "interface %s" % interface
+        print "switchport trunk allowed vlan remove %s" %vlan
+        print "exit"
+
+print '!'
+print "! Services Configlet Builder end"

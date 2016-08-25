@@ -1,0 +1,70 @@
+from jsonrpclib import Server
+import json
+import re
+from cvplibrary import SSHClient, SSHClientUser
+from cvplibrary import CVPGlobalVariables, GlobalVariableNames
+
+# Dummy Data Base location
+filename = "/home/cvp/demoDb.json"
+
+# Get focus on a switch for testing
+#CVPGlobalVariables.setNetElement( "00:50:56:3e:bf:5d" )
+#CVPGlobalVariables.setNetElement( "00:50:56:fd:bd:51" )
+
+#Import dummy db for switch info
+with open(filename, 'r') as fp:
+    db = json.load(fp)
+
+ztp = CVPGlobalVariables.getValue( GlobalVariableNames.ZTP_STATE );
+ip = CVPGlobalVariables.getValue( GlobalVariableNames.CVP_IP );
+
+if ztp =='true':
+    user = CVPGlobalVariables.getValue( GlobalVariableNames.ZTP_USERNAME );
+    password = CVPGlobalVariables.getValue( GlobalVariableNames.ZTP_PASSWORD );
+else:
+    user = CVPGlobalVariables.getValue( GlobalVariableNames.CVP_USERNAME );
+    password = CVPGlobalVariables.getValue( GlobalVariableNames.CVP_PASSWORD );
+
+# SSH Client version
+user = SSHClientUser( user, password );
+sshclient = SSHClient( user, ip );
+response = sshclient.executeCommand("show hostname | json");
+switchname = json.loads( response )
+response = sshclient.executeCommand("show interfaces management 1 | json");
+intfs = json.loads( response )
+response = sshclient.executeCommand("show lldp neighbors | json");
+lldpNeighbors = json.loads( response )["lldpNeighbors"];
+
+# Get Management Interface Address info"
+mgmtIp = intfs['interfaces']['Management1']['interfaceAddress'][0]['primaryIp']['address']
+mgmtMask = intfs['interfaces']['Management1']['interfaceAddress'][0]['primaryIp']['maskLen']
+
+# Get hostname from db if there else take name from switch and update db
+hostname = "unknown"
+for item in db:
+    if mgmtIp == item:
+        hostname = db[item]["name"];
+if hostname == "unknown":
+    hostname = switchname["hostname"];
+    db[mgmtIp]={'name':hostname}
+    
+# Add interface names to db with neighbor info
+# Problem in Lab only one lldp neighbor being found. 
+#for neighbor in lldpNeighbors:
+#  if neighbor['port'] != "Management1":
+#    neighborName = re.split(r'\.',str(neighbor['neighborDevice']))[0]
+#    db[mgmtIp]['interfaces']={neighbor['port']:{"neighborInt":neighbor['neighborPort'],\
+#    "neighborName":neighborName}}
+
+# Save db back to file    
+#with open(filename, 'wb') as fp:
+#    json.dump(db, fp)
+
+# Create Switch Configuration
+print "! Auto Configlet Builder %s Ma1 start" % hostname
+print 'hostname %s' % hostname
+print 'interface Management 1'
+print 'ip address %s/%d' % (mgmtIp, mgmtMask)
+print 'exit'
+print '!'
+print "! Auto Configlet Builder %s Ma1 end" % hostname

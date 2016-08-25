@@ -1,0 +1,132 @@
+from jsonrpclib import Server
+import json
+import re
+from cvplibrary import SSHClient, SSHClientUser
+from cvplibrary import CVPGlobalVariables, GlobalVariableNames
+config = True
+# Dummy Data Base location
+filename = "/home/cvp/demoDb.json"
+
+# Get focus on a switch for testing
+#CVPGlobalVariables.setNetElement( "00:50:56:3e:bf:5d" )
+#CVPGlobalVariables.setNetElement( "00:50:56:fd:bd:51" )
+
+#Import dummy db for switch info
+with open(filename, 'r') as fp:
+    db = json.load(fp)
+
+ztp = CVPGlobalVariables.getValue( GlobalVariableNames.ZTP_STATE );
+ip = CVPGlobalVariables.getValue( GlobalVariableNames.CVP_IP );
+
+if ztp =='true':
+    user = CVPGlobalVariables.getValue( GlobalVariableNames.ZTP_USERNAME );
+    password = CVPGlobalVariables.getValue( GlobalVariableNames.ZTP_PASSWORD );
+else:
+    user = CVPGlobalVariables.getValue( GlobalVariableNames.CVP_USERNAME );
+    password = CVPGlobalVariables.getValue( GlobalVariableNames.CVP_PASSWORD );
+
+# SSH Client version
+user = SSHClientUser( user, password );
+sshclient = SSHClient( user, ip );
+response = sshclient.executeCommand("show hostname | json");
+switchname = json.loads( response )
+response = sshclient.executeCommand("show interfaces management 1 | json");
+intfs = json.loads( response )
+response = sshclient.executeCommand("show lldp neighbors | json");
+lldpNeighbors = json.loads( response )["lldpNeighbors"];
+
+# Get Management Interface Address info"
+mgmtIp = intfs['interfaces']['Management1']['interfaceAddress'][0]['primaryIp']['address']
+mgmtMask = intfs['interfaces']['Management1']['interfaceAddress'][0]['primaryIp']['maskLen']
+
+# Get hostname from db if there else take name from switch and update db
+hostname = "unknown"
+for item in db:
+    if mgmtIp == item:
+        hostname = db[item]["name"];
+if hostname == "unknown":
+    hostname = switchname["hostname"];
+    db[mgmtIp]={'name':hostname}
+    
+# Add interface names to db with neighbor info
+# Problem in Lab only one lldp neighbor being found. 
+#for neighbor in lldpNeighbors:
+#  if neighbor['port'] != "Management1":
+#    neighborName = re.split(r'\.',str(neighbor['neighborDevice']))[0]
+#    db[mgmtIp]['interfaces']={neighbor['port']:{"neighborInt":neighbor['neighborPort'],\
+#    "neighborName":neighborName}}
+
+# Save db back to file    
+#with open(filename, 'wb') as fp:
+#    json.dump(db, fp)
+
+# Create Switch Configuration
+print "! Auto Configlet Builder %s configlet start" % hostname
+
+try:
+    len(db[mgmtIp]['interfaces'])
+except:
+    print "! No config for %s sorry :-(" % hostname
+    config = False
+
+if config == True:
+  # Create SNMP chassis-id
+    print "snmp-server chassis-id %s" % hostname
+
+    # Create IGMP snooping querier
+    querierAddress = re.split(r'/',str(db[mgmtIp]['interfaces']['Loopback0']['address']))[0]
+    print "ip igmp snooping querier address %s" % querierAddress
+
+    # Create VLANs and SVIs for switch
+    for vlan in db[mgmtIp]['vlans']:
+        vlanName = db[mgmtIp]['vlans'][vlan]["name"]
+        print "vlan %s" % vlan
+        print "   name %s" % vlanName
+        print "exit"
+        if db[mgmtIp]['vlans'][vlan]["address"] != "na":
+            ipAddress = db[mgmtIp]['vlans'][vlan]['address']
+            print "!"
+            print "interface Vlan%s" % vlan
+            print "   description *** %s ***" % vlanName
+            print "   ip address %s" % ipAddress
+            print "exit"
+        print '!'
+
+    # Create Interfaces for switch
+    for interface in db[mgmtIp]['interfaces']:
+      neighborInt = db[mgmtIp]['interfaces'][interface]['neighborInt']
+      neighborName = db[mgmtIp]['interfaces'][interface]['neighborName']
+      ipAddress = db[mgmtIp]['interfaces'][interface]['address']
+      print "   interface %s" % interface
+      print "   description *** %s %s ***" % (neighborName, neighborInt)
+      if ipAddress != "na":
+        print "   ip address %s" % ipAddress
+      print "exit"
+      print '!'
+
+    # Create BGP Config 
+    asNumber = db[mgmtIp]['bgp']['asNumber']
+    routerId = re.split(r'/',str(db[mgmtIp]['interfaces']['Loopback0']['address']))[0]
+    print "router bgp %s" % asNumber
+    print "   router-id %s" % routerId
+    for neighbor in db[mgmtIp]['bgp']['neighbor']:
+      peerGroup = db[mgmtIp]['bgp']['neighbor'][neighbor]
+      print "   neighbor %s peer-group %s" % (neighbor, peerGroup)
+    if len (db[mgmtIp]['bgp']['network']) >= 1:
+        for network in db[mgmtIp]['bgp']['network']:
+          print "   network %s" % network
+        print "exit"
+    print '!'
+
+    # Create MLAG configuration
+    if db[mgmtIp]['mlag']['status'] == "active":
+        print "mlag configuration"
+        print "   domain-id %s" % db[mgmtIp]['mlag']['id']
+        print "   local-interface %s" % db[mgmtIp]['mlag']['interface']
+        print "   peer-address %s" % db[mgmtIp]['mlag']['peerAddress']
+        print "   peer-link %s" % db[mgmtIp]['mlag']['peerLink']
+        print "   reload-delay %s" % db[mgmtIp]['mlag']['delay']
+        print "exit"
+        print "!"
+    
+print "! Auto Configlet Builder %s configlet end" % hostname

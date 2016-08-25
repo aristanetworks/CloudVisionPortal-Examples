@@ -1,0 +1,69 @@
+'''Script to calculate an ip address for a spine'''
+
+import jsonrpclib
+from cvplibrary import Form
+from cvplibrary import CVPGlobalVariables, GlobalVariableNames
+
+MAXINTS = 6
+BASENETWORK = '10.30.'
+ASN = 65000
+
+def buildmgmt():
+
+  # To Test
+  #CVPGlobalVariables.setNetElement( '2c:c2:60:0b:c8:21' )
+
+  ztp = CVPGlobalVariables.getValue(GlobalVariableNames.ZTP_STATE)
+  ip = CVPGlobalVariables.getValue(GlobalVariableNames.CVP_IP)
+
+  if ztp == 'true':
+    username = CVPGlobalVariables.getValue(GlobalVariableNames.ZTP_USERNAME)
+    password = CVPGlobalVariables.getValue(GlobalVariableNames.ZTP_PASSWORD)
+  else:
+    username = CVPGlobalVariables.getValue(GlobalVariableNames.CVP_USERNAME)
+    password = CVPGlobalVariables.getValue(GlobalVariableNames.CVP_PASSWORD)
+
+  url = 'https://%s:%s@%s/command-api' % (username, password, ip)
+  ss = jsonrpclib.Server(url)
+
+  intfs = ss.runCmds(1, ['enable', { 'cmd': 'show interfaces Management1' } ] )[1]
+  mgmtip = intfs['interfaces']['Management1']['interfaceAddress'][0]['primaryIp']['address']
+  mgmtMask = intfs['interfaces']['Management1']['interfaceAddress'][0]['primaryIp']['maskLen']
+
+  print "interface Management 1"
+  print "vrf forwarding mgmt"
+  print "ip address %s/%s" % (mgmtip, mgmtMask)
+  print "!"
+  
+def makeintfips(spine):
+  last_octet = 0
+  for int in range(1, (MAXINTS + 1)):
+    intip = '%s%s.%s' % ( BASENETWORK, str(spine), str(last_octet))
+    print 'interface Ethernet%s' % str(int)
+    print 'no switchport'
+    print 'ip address %s/31' % ( intip )
+    print '!'
+    last_octet += 2
+    
+def makebgppeers(spine):
+  last_octet = 1
+  incr = 0
+  print 'router bgp %s' % str(ASN)
+  for peer in range(1, (MAXINTS + 1)):
+    peerip = '%s%s.%s' % (BASENETWORK, str(spine), str(last_octet))
+    if peer % 2 != 0:
+      incr += 1
+    print 'neighbor %s remote-as %s' % (peerip, str(ASN + incr))
+    last_octet += 2
+    
+
+def main():
+  spine = Form.getFieldById('spine_number').getValue()
+  print "hostname spine-%s" % str(spine)
+  print "!"
+  makeintfips(spine)
+  makebgppeers(spine)
+  buildmgmt()
+
+if __name__ == "__main__":
+   main()

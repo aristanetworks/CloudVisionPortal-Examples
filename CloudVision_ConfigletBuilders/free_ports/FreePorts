@@ -1,0 +1,41 @@
+from cvplibrary import Form
+from cvplibrary import CVPGlobalVariables,GlobalVariableNames
+import jsonrpclib
+import socket, struct
+from jsonrpclib import Server
+import time
+
+# Get values from from
+username = Form.getFieldById( 'username' ).getValue()
+password = Form.getFieldById( 'password' ).getValue()
+ip = Form.getFieldById( 'DeviceIP' ).getValue()
+
+print "!Free ports on %s" % ip
+switch = Server( "https://%s:%s@%s/command-api" % (username, password, ip) )
+response = switch.runCmds( 1, ["show version"] )
+print "<Device Information>\nIP Address: %s \nSerial Number: %s\nSystem MAC address: %s\nEOS Version: %s\nSwitch Type: %s \nSwitch Boot Time: %s\n"% (ip,response[0]["serialNumber"], response[0]["systemMacAddress"],response[0]["version"],response[0]["modelName"],  time.strftime("%a, %d %b %Y %H:%M:%S %p %Z", time.localtime(response[0]["bootupTimestamp"])))
+
+response1 = switch.runCmds(1, ["show interfaces counters rates"])
+keys = response1 [0]['interfaces'].keys()
+rates = response1 [0]['interfaces'].values()
+
+response2 = switch.runCmds( 1, ["show interfaces counters"])
+key2 = response2[0]['interfaces'].keys()
+count2 = response2[0]['interfaces'].values()
+
+print "The ports with no inbound and/or outbound activity"
+for i in range(len(keys)):
+  
+  if (rates[i].get('inBpsRate') == 0.0) or (rates[i].get('outBpsRate') == 0.0):
+    print "********"
+    print "%s has not seen input and/or output traffic for the last %s seconds.\n The interface statstics that were captured during this check are; \n input in PPS %s \n input in BPS %s \n output in PPS %s \n output in BPS %s " % (keys[i],rates[i].get('interval'),rates[i].get('inPpsRate'),rates[i].get('inBpsRate'),rates[i].get('outPpsRate'),rates[i].get('outBpsRate') )
+    if keys[i] == key2[i]:
+      print "Interface Counter status:\n Octets IN: %s\n Octets OUT: %s\n Broadcast Pkts IN: %s\n Broadcast Pkts OUT: %s\n Unicast Pkts IN: %s\n Unicast Pkts OUT: %s\n Multicast Pkts IN: %s\n Multicast Pkts OUT: %s\n Input Discards: %s \n Output Discards: %s\n "% (count2[i].get('inOctets'),count2[i].get('outOctets'),count2[i].get('inBroadcastPkts'),count2[i].get('outBroadcastPkts'),count2[i].get('inUcastPkts'),count2[i].get('outUcastPkts'),count2[i].get('inMulticastPkts'),count2[i].get('outMulticastPkts'),count2[i].get('inDiscards'),count2[i].get('outDiscards'))
+    else:
+      print "Check Script logic"
+
+#for j in range(len(keys)):
+  #print key2[j]
+  #print "Interface Counter status:\n Octets IN: %s\n Octets OUT: %s\n Broadcast Pkts IN: %s\n Broadcast Pkts OUT: %s\n Unicast Pkts IN: %s\n Unicast Pkts OUT: %s\n Multicast Pkts IN: %s\n Multicast Pkts OUT: %s\n Input Discards: %s \n Output Discards: %s\n "% (count2[j].get('inOctets'),count2[j].get('outOctets'),count2[j].get('inBroadcastPkts'),count2[j].get('outBroadcastPkts'),count2[j].get('inUcastPkts'),count2[j].get('outUcastPkts'),count2[j].get('inMulticastPkts'),count2[j].get('outMulticastPkts'),count2[j].get('inDiscards'),count2[j].get('outDiscards'))
+
+

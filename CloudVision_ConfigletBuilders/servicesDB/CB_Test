@@ -1,0 +1,14 @@
+from cvplibrary import Form
+from cvplibrary import CVPGlobalVariables, GlobalVariableNames
+
+managmentIpField = Form.getFieldById('managementIpField')
+switchNameField = Form.getFieldById('switchNameField')
+managementMaskField = Form.getFieldById('managementMaskField')
+
+managementNetwork = managmentIpField.getValue() + managementMaskField.getValue()
+
+print "! This was Created with Configlet Builder"
+print "hostname", switchNameField.getValue()
+print "interface Management 1"
+print "ip address", managementNetwork
+print "exit"

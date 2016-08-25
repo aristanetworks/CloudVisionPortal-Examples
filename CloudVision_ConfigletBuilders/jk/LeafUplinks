@@ -1,0 +1,79 @@
+'''Script to calculate an ip address for a leaf'''
+
+from cvplibrary import Form
+import jsonrpclib
+from cvplibrary import CVPGlobalVariables, GlobalVariableNames
+
+SPINEWIDTH = 4
+BASENETWORK = '10.30.'
+BASEASN = 65000
+
+def buildmgmt():
+  
+  # To Test set the below variable to an actual mac address
+  # of a switch managed by cloudvision
+  #
+  #CVPGlobalVariables.setNetElement( '2c:c2:60:d7:d9:97' )
+  ztp = CVPGlobalVariables.getValue(GlobalVariableNames.ZTP_STATE)
+  ip = CVPGlobalVariables.getValue(GlobalVariableNames.CVP_IP)
+
+  if ztp == 'true':
+    username = CVPGlobalVariables.getValue(GlobalVariableNames.ZTP_USERNAME)
+    password = CVPGlobalVariables.getValue(GlobalVariableNames.ZTP_PASSWORD)
+  else:
+    username = CVPGlobalVariables.getValue(GlobalVariableNames.CVP_USERNAME)
+    password = CVPGlobalVariables.getValue(GlobalVariableNames.CVP_PASSWORD)
+
+  url = 'https://%s:%s@%s/command-api' % (username, password, ip)
+  ss = jsonrpclib.Server(url)
+
+  intfs = ss.runCmds(1, ['enable', { 'cmd': 'show interfaces Management1' } ] )[1]
+  mgmtip = intfs['interfaces']['Management1']['interfaceAddress'][0]['primaryIp']['address']
+  mgmtMask = intfs['interfaces']['Management1']['interfaceAddress'][0]['primaryIp']['maskLen']
+
+  print "interface Management 1"
+  print "vrf forwarding mgmt"
+  print "ip address %s/%s" % (mgmtip, mgmtMask)
+  print "!"
+
+def calcint(spine, sw):
+   if sw.endswith('a'):
+      subtractor = 3
+   else:
+      subtractor = 1
+   intip = '%s%s.%s' % ( BASENETWORK, spine, (str((int(sw[0]) * 4) - subtractor)))
+   return intip
+   
+def makeintfips(sw):
+  for spine in range(1, (SPINEWIDTH+1)):
+    intip = calcint(spine, sw)
+    print 'interface Ethernet%s' % str(spine)
+    print 'no switchport'
+    print 'ip address %s/31' % intip
+    print '!'
+  
+def calcpeer(spine, sw):
+  if sw.endswith('a'):
+    subtractor = 4
+  else:
+    subtractor = 2
+  peerip = '%s%s.%s' % ( BASENETWORK, spine, (str((int(sw[0]) * 4) - subtractor)))
+  return peerip
+  
+def makebgppeers(sw):
+  asn = str(BASEASN + int(sw[0]))
+  print 'router bgp %s' % asn
+  for spine in range(1, (SPINEWIDTH+1)):
+    peerip = calcpeer(spine, sw)
+    print 'neighbor %s remote-as %s' % (peerip, str(BASEASN))
+
+def main():
+  sw = Form.getFieldById('sw').getValue()
+  print "hostname leaf-%s" % str(sw)
+  print "!"
+  makeintfips(sw)
+  makebgppeers(sw)
+  buildmgmt()
+
+if __name__ == "__main__":
+   main()
