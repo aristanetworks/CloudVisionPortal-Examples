@@ -1,0 +1,30 @@
+import jsonrpclib
+from cvplibrary import CVPGlobalVariables, GlobalVariableNames
+
+#Just to test:
+#  - uncomment the setNetElement line below
+#  - set the mac address to a known device's mac
+#  - Press Generate button
+#CVPGlobalVariables.setNetElement( "00:0C:29:A9:2E:2F" );
+
+ztp = CVPGlobalVariables.getValue( GlobalVariableNames.ZTP_STATE );
+ip = CVPGlobalVariables.getValue( GlobalVariableNames.CVP_IP );
+
+if ztp == 'true':
+  user = CVPGlobalVariables.getValue( GlobalVariableNames.ZTP_USERNAME );
+  passwd = CVPGlobalVariables.getValue( GlobalVariableNames.ZTP_PASSWORD );
+else:
+  user = CVPGlobalVariables.getValue( GlobalVariableNames.CVP_USERNAME );
+  passwd = CVPGlobalVariables.getValue( GlobalVariableNames.CVP_PASSWORD );
+
+url = "https://%s:%s@%s/command-api" % ( user, passwd, ip )
+ss = jsonrpclib.Server( url )
+
+hostname = ss.runCmds( 1, [ "enable", { "cmd" : "show hostname" } ] )[1]
+intfs = ss.runCmds( 1, [ "enable", { "cmd" : "show interfaces Management 1" } ] )[1]
+mgmtIp = intfs[ 'interfaces' ][ 'Management1' ][ 'interfaceAddress' ][ 0 ][ 'primaryIp' ][ 'address' ]
+mgmtMask = intfs[ 'interfaces' ][ 'Management1' ][ 'interfaceAddress' ][ 0 ][ 'primaryIp' ][ 'maskLen' ]
+
+print 'hostname %s' % hostname[ 'fqdn' ]
+print 'interface Management 1'
+print '  ip address %s/%d' % ( mgmtIp, mgmtMask )

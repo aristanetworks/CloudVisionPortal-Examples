@@ -1,0 +1,17 @@
+from cvplibrary import RestClient
+import json
+  
+url='http://localhost:8080/web/configlet/addConfiglet.do'
+
+conf = """!
+interface ethernet1
+   description TESTTEST
+"""
+data = {
+  "config": conf,
+  "name": "CB_RestClientPost"
+}
+client= RestClient(url,'POST')
+client.setRawData(json.dumps(data))
+if client.connect():
+  print client.getResponse()

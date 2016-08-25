@@ -1,0 +1,10 @@
+# Taken directly from CloudVision_ConfigGuide-2016.1.1
+# Section 8.2.4.3
+from cvplibrary import RestClient
+
+url='http://localhost:8080/web/inventory/getInventory.do?queryparam=&startIndex=0&endIndex=15';
+
+method= 'GET';
+client= RestClient(url,method);
+if client.connect():
+ print client.getResponse()

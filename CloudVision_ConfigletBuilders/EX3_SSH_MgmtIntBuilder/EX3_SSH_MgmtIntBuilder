@@ -1,0 +1,38 @@
+from cvplibrary import SSHClient, SSHClientUser
+from cvplibrary import CVPGlobalVariables, GlobalVariableNames
+import json
+
+#Just to test:
+#  - uncomment the setNetElement line below
+#  - set the mac address to a known device's mac
+#  - press the 'Generate' button
+#CVPGlobalVariables.setNetElement( "00:0C:29:3e:d0:dc" );
+
+ztp = CVPGlobalVariables.getValue( GlobalVariableNames.ZTP_STATE )
+ip = CVPGlobalVariables.getValue( GlobalVariableNames.CVP_IP )
+
+if ztp == 'true':
+  user = CVPGlobalVariables.getValue( GlobalVariableNames.ZTP_USERNAME )
+  paswd = CVPGlobalVariables.getValue( GlobalVariableNames.ZTP_PASSWORD )
+else:
+  user = CVPGlobalVariables.getValue( GlobalVariableNames.CVP_USERNAME )
+  paswd = CVPGlobalVariables.getValue( GlobalVariableNames.CVP_PASSWORD )
+
+user = SSHClientUser( user, paswd )
+sshclient = SSHClient( user, ip )
+
+cmd = 'show hostname | json'
+resp = sshclient.executeCommand( cmd )
+fqdn = json.loads( resp )[ 'fqdn' ]
+
+cmd = 'show interface management 1 | json'
+resp = sshclient.executeCommand( cmd )
+intf = json.loads( resp )
+primaryIp = intf[ 'interfaces' ][ 'Management1' ][ 'interfaceAddress' ] \ [ 0 ][ 'primaryIp' ]
+address = primaryIp[ 'address' ]
+maskLen = primaryIp[ 'maskLen' ]
+
+print 'hostname %s' % fqdn
+print 'interface Management 1'
+print '  ip address %s/%s' % ( address, maskLen )
+print '!'

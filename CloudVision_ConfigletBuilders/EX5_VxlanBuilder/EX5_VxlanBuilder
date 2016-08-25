@@ -1,0 +1,60 @@
+#function to generate VxLan config
+
+from cvplibrary import Form
+from cvplibrary import CVPGlobalVariables,GlobalVariableNames
+import socket, struct
+
+def ip2long(ip):
+    """
+    Convert an IP string to long
+    """
+    packedIP = socket.inet_aton(ip)
+    return struct.unpack("!L", packedIP)[0]
+    
+def long2ip(long):
+    """
+    Convert a long to an IP string
+    """
+    stringIP = socket.inet_ntoa(struct.pack('!L', long))
+    return stringIP
+
+def addLine( command ):
+    return '\r\n'+command;
+    
+# Main Code starts here
+
+VxBaseVlan= int( Form.getFieldById( 'VxBaseVLAN' ).getValue() );
+VxNumVlans= int( Form.getFieldById( 'VxNumberVLANs' ).getValue() );
+VxBaseVNI= int( Form.getFieldById( 'VxBaseVNI' ).getValue() );
+VxBaseIP= Form.getFieldById( 'VxBaseIP' ).getValue();
+VxSubnetMask= Form.getFieldById( 'VxSubnetMask' ).getValue();
+
+# Generate the VLANs config
+
+count = 0;
+CONFIG='';
+while count < VxNumVlans:
+  CONFIG='interface vlan '+ str(VxBaseVlan + count);
+  ipnum = ip2long(VxBaseIP) + count*256;
+  ip = long2ip(ipnum);
+  CONFIG=CONFIG+addLine('  mtu 9164');
+  CONFIG=CONFIG+addLine('  ip address '+ ip + '/' + VxSubnetMask);
+  CONFIG=CONFIG+addLine('!');
+  print(CONFIG);
+  count += 1;
+
+# Generate the VxLANs config
+
+count = 0;
+CONFIG2='';
+print('interface Vxlan1');
+print('  vxlan source-interface Loopback1'); 
+print('  vxlan controller-client');
+print('  vxlan udp-port 4789');
+
+while count < VxNumVlans:
+    CONFIG2='  vxlan vlan ' + str(VxBaseVlan + count) + ' vni ' + str(VxBaseVNI + VxBaseVlan + count);
+    print(CONFIG2);
+    count += 1;
+
+print('!');

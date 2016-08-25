@@ -1,7 +1,7 @@
 # Arista Cloudvision&reg; Portal Configlet Builder Examples
 This directory contains a collection of Configlet Builder examples and best practices for
 CloudVision&reg; Portal. Each directory should contain an example with a small writeup (README.md)
-describing the function.
+describing the function. 
 
 ## Directives
 A helper script ('parse_configlet_export.py') has been provided to assist in parsing out the
@@ -33,14 +33,15 @@ Add your README.md file describing the function of your Configlet Builder exampl
  
 Commit your example.
 
-## free_ports
+## Examples shipped as part of cvp-tools
+* EX0_TestGlobalsBuilder
+* EX1_Form_MgmtIntBuilder
+* EX2_eAPI_MgmtIntBuilder
+* EX3_SSH_MgmtIntBuilder
+* EX4_mySQL_MgmtIntBuilder
+* EX5_VxlanBuilder
 
-TBA
-
-## servicesDB
-
-TBA
-
-## jk
-
-TBA
+## User provided examples
+* free_ports
+* servicesDB
+* jk

@@ -1,0 +1,21 @@
+from cvplibrary import SSHClient, SSHClientUser
+from cvplibrary import CVPGlobalVariables, GlobalVariableNames
+import json
+
+#set the mac address to a known device's mac
+CVPGlobalVariables.setNetElement( "00:0C:29:A9:2E:2F" ) 
+
+ztp = CVPGlobalVariables.getValue( GlobalVariableNames.ZTP_STATE )
+ip = CVPGlobalVariables.getValue( GlobalVariableNames.CVP_IP )
+
+if ztp == 'true':
+  user = CVPGlobalVariables.getValue( GlobalVariableNames.ZTP_USERNAME )
+  paswd = CVPGlobalVariables.getValue( GlobalVariableNames.ZTP_PASSWORD )
+else:
+  user = CVPGlobalVariables.getValue( GlobalVariableNames.CVP_USERNAME )
+  paswd = CVPGlobalVariables.getValue( GlobalVariableNames.CVP_PASSWORD )
+
+mac=CVPGlobalVariables.getValue(GlobalVariableNames.CVP_MAC); 
+print '! user: %s, pswd: %s' % (user, paswd)
+print '! device in ztp: %s' % (ztp)
+print '! mac: ' + mac + ', ip: ' + ip

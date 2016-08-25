@@ -1,0 +1,11 @@
+from cvplibrary import Form
+from cvplibrary import CVPGlobalVariables,GlobalVariableNames
+
+#test by inputting Form and pressing "Generate" button
+
+ip = Form.getFieldById( 'IP' ).getValue()
+netmask = Form.getFieldById( 'NETMASK' ).getValue()
+
+print 'interface Management 1'
+print '  ip address %s/%s' % ( ip, netmask )
+print '!'

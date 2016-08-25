@@ -1,0 +1,27 @@
+import pymysql
+from cvplibrary import CVPGlobalVariables, GlobalVariableNames
+
+#Just to test:
+#  - uncomment the setNetElement line below
+#  - set the mac address to a known device's mac
+#  - Press Generate button
+#  - Note: This configBuidler also requires a host running a mysql DB
+#CVPGlobalVariables.setNetElement( "00:0C:29:A9:2E:2F" );
+
+# Get this devices MAC address
+mac = CVPGlobalVariables.getValue( GlobalVariableNames.CVP_MAC )
+
+# Fetch the config for this device from mysql
+con = pymysql.connect( host='172.31.5.59', user='root', passwd='PASSWORD', db='device' )
+cur = con.cursor()
+cur.execute( "SELECT * from mgmt where mac = '%s'" % mac )
+_, _, ip, mask, route, fqdn = cur.fetchall()[ 0]
+cur.close()
+con.close()
+
+# Generate the hostname, Management interface, default route
+print 'hostname %s' % fqdn
+print 'interface Management 1'
+print '   ip address %s/%d' % ( ip, mask )
+print '!'
+print 'ip route 0.0.0.0/0 %s' % route
