@@ -1,0 +1,5 @@
+This script is more of a static script intented to quickly provision leaf switches when deploying a green field datacenter. There are some variables that need to be changed per datacenter like BGP AS numbers being used, Rack numbers, and Base Network Subnet being used. 
+
+The script will then create on the switches in this subnet on the int management interface the IP address (based on the variables defined earlier) as well as put it in a VRF called mgmt. It will also create on (starting on Eth1 by default) assign IP addresses on these ports to create the eBGP Spine & Leaf links. 
+
+Finally the script will add in a hostname for the switch based on the subnet/IP addr defined previously. 
