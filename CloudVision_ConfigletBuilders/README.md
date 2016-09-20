@@ -30,12 +30,13 @@ CB_example1 CB_exmaple2 ExportedConfigletsData.zip
 ```
 
 ## How to Import Configlet Builder templates into CloudVision
-There are teo main ways to import these templates into CloudVision. 
+There are two main ways to import these templates into CloudVision. 
+
 a) Download the zip file from each dir and click Upload under CloudVision > Configlets > Import > choose zip file. 
 
-b) SSH to your CVP server and ensure you can reach this GitHub repo. 
+b) SSH to your CVP server and ensure you can reach this GitHub repo. Git clone the script and restore the configlet via cvptools.
 
-c) Examples shipped with cvp-tools (CloudVision) can be added by going to the bash and type
+Examples shipped with cvp-tools (CloudVision) can be added by going to the bash and type
 ```console
 $ cd /cvp/tools
 $ ./cvptool.py --host <host> --user <user> --password <pass> --objects Configlets --action restore --tarFile
