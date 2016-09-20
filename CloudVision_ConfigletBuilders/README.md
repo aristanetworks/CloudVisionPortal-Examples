@@ -3,6 +3,8 @@ This directory contains a collection of Configlet Builder examples and best prac
 CloudVision&reg; Portal. Each directory should contain an example with a small writeup (README.md)
 describing the function. 
 
+Each dir should also have the .zip file that was exported so that others can easily upload it into CVP, as well as the txt file with the actual script file itself. This will make it easy for others to edit files. 
+
 ## Directives
 A helper script ('parse_configlet_export.py') has been provided to assist in parsing out the
 meat of the Configlet Builders. Example:
@@ -28,6 +30,9 @@ $ ../parse_configlet_export.py ExportedConfigletsData.zip
 $ ls
 CB_example1 CB_exmaple2 ExportedConfigletsData.zip
 ```
+Add your README.md file describing the function of your Configlet Builder example.
+ 
+Commit your example.
 
 ## How to Import Configlet Builder templates into CloudVision
 There are two main ways to import these templates into CloudVision. 
@@ -42,10 +47,6 @@ $ cd /cvp/tools
 $ ./cvptool.py --host <host> --user <user> --password <pass> --objects Configlets --action restore --tarFile
 examples.tar. 
 ```
-
-Add your README.md file describing the function of your Configlet Builder example.
- 
-Commit your example.
 
 ## Examples shipped as part of cvp-tools
 * EX0_TestGlobalsBuilder
