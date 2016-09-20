@@ -2,5 +2,5 @@ This script is to check a switch for free ports and report back to the user as a
 
 It could be used alternatively as a tool to show or teach python/eAPI to users, kind of like the W3Schools try it yourself function. The generate function will give a visual result of what you are creating in the edit window on the Built Configlet window. 
 
-# Directions
+Directions
 Once you've imported this configlet, you will have 3 fields to enter before you can use this script. Enter the username, password, and IP address of a switch -- then click Generate. The right window will shown an output of free ports and its status in the past 5 minutes. 
