@@ -1,0 +1,3 @@
+In this example, the Configlet Builder uses the device’s MAC address to lookup up its Management IP
+address, netmask, default route, and host name, which are stored on external MySQL server, and
+generates a new Configlet to preserve the configuration
