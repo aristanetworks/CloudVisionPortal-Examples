@@ -1,0 +1,1 @@
+This CB is meant to add "services" to interfaces. Services in this case could be a add/removeVLAN, IP address. Each Service is tied to a set of actions on a certain ethernet interface. Users can continue to add to this list of services and to help speed up repeitive tasks. 
