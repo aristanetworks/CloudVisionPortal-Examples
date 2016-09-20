@@ -1,1 +1,79 @@
-{"data":{"configletBuilder":[{"isAssigned":false,"formList":[{"fieldId":"sw","fieldLabel":"DeviceLocation","type":"Drop down","value":"1a,1b,2a,2b,3a,3b,4a,4b,5a,5b,6a,6b,7a,7b,8a,8b,9a,9b,10a,10b","depends":"","validation":{"mandatory":true},"dataValidation":"","helpText":"Enter the location of the device, e.g. rack 2, location a = 2a","configletBuilderId":"configletBuilderMapper_661_283387525296815","orderId":0,"key":"fieldId_659_283387474056358","dataValidationErrorExist":false,"previewValue":""}],"name":"LeafUplinks","type":"Builder","main_script":{"data":"'''Script to calculate an ip address for a leaf'''\n\nfrom cvplibrary import Form\nimport jsonrpclib\nfrom cvplibrary import CVPGlobalVariables, GlobalVariableNames\n\nSPINEWIDTH = 4\nBASENETWORK = '10.30.'\nBASEASN = 65000\n\ndef buildmgmt():\n  \n  # To Test set the below variable to an actual mac address\n  # of a switch managed by cloudvision\n  #\n  #CVPGlobalVariables.setNetElement( '2c:c2:60:d7:d9:97' )\n  ztp = CVPGlobalVariables.getValue(GlobalVariableNames.ZTP_STATE)\n  ip = CVPGlobalVariables.getValue(GlobalVariableNames.CVP_IP)\n\n  if ztp == 'true':\n    username = CVPGlobalVariables.getValue(GlobalVariableNames.ZTP_USERNAME)\n    password = CVPGlobalVariables.getValue(GlobalVariableNames.ZTP_PASSWORD)\n  else:\n    username = CVPGlobalVariables.getValue(GlobalVariableNames.CVP_USERNAME)\n    password = CVPGlobalVariables.getValue(GlobalVariableNames.CVP_PASSWORD)\n\n  url = 'https:\/\/%s:%s@%s\/command-api' % (username, password, ip)\n  ss = jsonrpclib.Server(url)\n\n  intfs = ss.runCmds(1, ['enable', { 'cmd': 'show interfaces Management1' } ] )[1]\n  mgmtip = intfs['interfaces']['Management1']['interfaceAddress'][0]['primaryIp']['address']\n  mgmtMask = intfs['interfaces']['Management1']['interfaceAddress'][0]['primaryIp']['maskLen']\n\n  print \"interface Management 1\"\n  print \"vrf forwarding mgmt\"\n  print \"ip address %s\/%s\" % (mgmtip, mgmtMask)\n  print \"!\"\n\ndef calcint(spine, sw):\n   if sw.endswith('a'):\n      subtractor = 3\n   else:\n      subtractor = 1\n   intip = '%s%s.%s' % ( BASENETWORK, spine, (str((int(sw[0]) * 4) - subtractor)))\n   return intip\n   \ndef makeintfips(sw):\n  for spine in range(1, (SPINEWIDTH+1)):\n    intip = calcint(spine, sw)\n    print 'interface Ethernet%s' % str(spine)\n    print 'no switchport'\n    print 'ip address %s\/31' % intip\n    print '!'\n  \ndef calcpeer(spine, sw):\n  if sw.endswith('a'):\n    subtractor = 4\n  else:\n    subtractor = 2\n  peerip = '%s%s.%s' % ( BASENETWORK, spine, (str((int(sw[0]) * 4) - subtractor)))\n  return peerip\n  \ndef makebgppeers(sw):\n  asn = str(BASEASN + int(sw[0]))\n  print 'router bgp %s' % asn\n  for spine in range(1, (SPINEWIDTH+1)):\n    peerip = calcpeer(spine, sw)\n    print 'neighbor %s remote-as %s' % (peerip, str(BASEASN))\n\ndef main():\n  sw = Form.getFieldById('sw').getValue()\n  print \"hostname leaf-%s\" % str(sw)\n  print \"!\"\n  makeintfips(sw)\n  makebgppeers(sw)\n  buildmgmt()\n\nif __name__ == \"__main__\":\n   main()","key":null}}],"configlet":[]}}
+'''Script to calculate an ip address for a leaf'''
+
+from cvplibrary import Form
+import jsonrpclib
+from cvplibrary import CVPGlobalVariables, GlobalVariableNames
+
+SPINEWIDTH = 4
+BASENETWORK = '10.30.'
+BASEASN = 65000
+
+def buildmgmt():
+  
+  # To Test set the below variable to an actual mac address
+  # of a switch managed by cloudvision
+  #
+  #CVPGlobalVariables.setNetElement( '2c:c2:60:d7:d9:97' )
+  ztp = CVPGlobalVariables.getValue(GlobalVariableNames.ZTP_STATE)
+  ip = CVPGlobalVariables.getValue(GlobalVariableNames.CVP_IP)
+
+  if ztp == 'true':
+    username = CVPGlobalVariables.getValue(GlobalVariableNames.ZTP_USERNAME)
+    password = CVPGlobalVariables.getValue(GlobalVariableNames.ZTP_PASSWORD)
+  else:
+    username = CVPGlobalVariables.getValue(GlobalVariableNames.CVP_USERNAME)
+    password = CVPGlobalVariables.getValue(GlobalVariableNames.CVP_PASSWORD)
+
+  url = 'https://%s:%s@%s/command-api' % (username, password, ip)
+  ss = jsonrpclib.Server(url)
+
+  intfs = ss.runCmds(1, ['enable', { 'cmd': 'show interfaces Management1' } ] )[1]
+  mgmtip = intfs['interfaces']['Management1']['interfaceAddress'][0]['primaryIp']['address']
+  mgmtMask = intfs['interfaces']['Management1']['interfaceAddress'][0]['primaryIp']['maskLen']
+
+  print "interface Management 1"
+  print "vrf forwarding mgmt"
+  print "ip address %s/%s" % (mgmtip, mgmtMask)
+  print "!"
+
+def calcint(spine, sw):
+   if sw.endswith('a'):
+      subtractor = 3
+   else:
+      subtractor = 1
+   intip = '%s%s.%s' % ( BASENETWORK, spine, (str((int(sw[0]) * 4) - subtractor)))
+   return intip
+   
+def makeintfips(sw):
+  for spine in range(1, (SPINEWIDTH+1)):
+    intip = calcint(spine, sw)
+    print 'interface Ethernet%s' % str(spine)
+    print 'no switchport'
+    print 'ip address %s/31' % intip
+    print '!'
+  
+def calcpeer(spine, sw):
+  if sw.endswith('a'):
+    subtractor = 4
+  else:
+    subtractor = 2
+  peerip = '%s%s.%s' % ( BASENETWORK, spine, (str((int(sw[0]) * 4) - subtractor)))
+  return peerip
+  
+def makebgppeers(sw):
+  asn = str(BASEASN + int(sw[0]))
+  print 'router bgp %s' % asn
+  for spine in range(1, (SPINEWIDTH+1)):
+    peerip = calcpeer(spine, sw)
+    print 'neighbor %s remote-as %s' % (peerip, str(BASEASN))
+
+def main():
+  sw = Form.getFieldById('sw').getValue()
+  print "hostname leaf-%s" % str(sw)
+  print "!"
+  makeintfips(sw)
+  makebgppeers(sw)
+  buildmgmt()
+
+if __name__ == "__main__":
+   main()
