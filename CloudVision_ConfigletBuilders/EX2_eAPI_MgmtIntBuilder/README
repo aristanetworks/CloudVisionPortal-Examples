@@ -1,2 +1,1 @@
-This example uses eAPI to read the management interface configuration that the device received from
-the DHCP server during the ZTP boot, and generates a new Configlet to preserve the configuration. 
+This example uses eAPI to read the management interface configuration that the device received from the DHCP server during the ZTP boot, and generates a new Configlet to preserve the configuration. 
