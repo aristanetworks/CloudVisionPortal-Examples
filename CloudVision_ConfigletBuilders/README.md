@@ -40,7 +40,7 @@ c) Examples shipped with cvp-tools (CloudVision) can be added by going to the ba
 $ cd /cvp/tools
 $ ./cvptool.py --host <host> --user <user> --password <pass> --objects Configlets --action restore --tarFile
 examples.tar. 
-```console
+```
 
 Add your README.md file describing the function of your Configlet Builder example.
  
