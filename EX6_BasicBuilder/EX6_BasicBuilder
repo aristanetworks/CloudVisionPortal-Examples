@@ -1,0 +1,95 @@
+from cvplibrary import CVPGlobalVariables, Form, GlobalVariableNames
+from jsonrpclib import Server
+import re
+
+def getglobalvars():
+  '''
+  Get CVP global variables which are referenced main and other ancillary functions functions.
+  '''
+
+  ztp = CVPGlobalVariables.getValue( GlobalVariableNames.ZTP_STATE )
+
+  if ztp == 'true':
+    user = CVPGlobalVariables.getValue( GlobalVariableNames.ZTP_USERNAME )
+    paswd = CVPGlobalVariables.getValue( GlobalVariableNames.ZTP_PASSWORD )
+  else:
+    user = CVPGlobalVariables.getValue( GlobalVariableNames.CVP_USERNAME )
+    paswd = CVPGlobalVariables.getValue( GlobalVariableNames.CVP_PASSWORD )
+
+  ip = CVPGlobalVariables.getValue( GlobalVariableNames.CVP_IP )
+  mac = CVPGlobalVariables.getValue( GlobalVariableNames.CVP_MAC )
+
+  serial = CVPGlobalVariables.getValue( GlobalVariableNames.CVP_SERIAL )
+
+  labels = CVPGlobalVariables.getValue( GlobalVariableNames.CVP_SYSTEM_LABELS )
+
+  return ztp, user, paswd, ip, mac, serial, labels
+
+def main():
+  ztp, user, paswd, ip, mac, serial, labels = getglobalvars( )
+
+  hostname = str(Form.getFieldById('hostname').getValue())
+
+  if len(Form.getFieldById('mgmtint').getValue()):
+    mgmtint = str(Form.getFieldById('mgmtint').getValue())
+  else:
+    for label in labels:
+      if re.match('^DCS\-.', label) is not None:
+        model = label
+        break
+    if re.match('^DCS\-73.|^DCS\-75,', model) is not None:
+      mgmtint = 'Management0'
+    else:
+      mgmtint = 'Management1'
+  
+  mgmtip = str(Form.getFieldById('mgmtip').getValue())
+  
+  mgmtdesc = str(Form.getFieldById('mgmtdesc').getValue())
+
+  if len(Form.getFieldById('mgmtvrf').getValue()):
+    mgmtvrf = str(Form.getFieldById('mgmtvrf').getValue())
+  else:
+    mgmtvrf = 'default'
+
+  basecfg = 'hostname %s\n' % hostname
+  basecfg += '!\n'
+  
+  if re.match('^default$', mgmtvrf) is None:
+    basecfg += 'vrf definition %s\n' % mgmtvrf
+    if re.match('^management', mgmtvrf) is not None:
+      basecfg += '  rd 1:1\n'
+    else:
+      basecfg += '  rd 2:1\n'
+    basecfg += '!\n'
+  
+  if re.match('Management0|Management1', mgmtint) is None:
+    vlanid = re.findall('[0-9]+', mgmtint)
+    basecfg += 'vlan %s\n' % vlanid[0]
+    basecfg += '  state active\n'
+    basecfg += '  name %s\n' % mgmtdesc
+    basecfg += '!\n'    
+    
+  basecfg += 'interface %s\n' % mgmtint
+  if re.match('Management0|Management1', mgmtint) is None:
+    basecfg += '  description %s\n' % mgmtdesc
+  basecfg += '  ip address %s/23\n' % mgmtip
+  basecfg += '  vrf forwarding %s\n' % mgmtvrf
+  basecfg += '  no shutdown\n'
+  basecfg += '!\n'
+  
+  switch = Server('https://%s:%s@%s/command-api' % (user, paswd, ip))
+  showcmd = "show ip route 0.0.0.0/0"
+  runcmd = switch.runCmds(1, ["enable", { "cmd": showcmd}])[1]
+  mgmtgw = runcmd['vrfs']['default']['routes']['0.0.0.0/0']['vias'] \ [ 0 ]['nexthopAddr']
+  basecfg += 'ip route vrf %s 0.0.0.0/0 %s\n' % (mgmtvrf, mgmtgw)
+  basecfg += '!\n'
+  
+  if re.match('^default$', mgmtvrf) is None:
+    basecfg += 'management api http-commands\n'
+    basecfg += '  vrf %s\n' % mgmtvrf
+    basecfg += '    no shutdown\n'
+    basecfg += '!\n'
+  
+  print basecfg
+
+main()
