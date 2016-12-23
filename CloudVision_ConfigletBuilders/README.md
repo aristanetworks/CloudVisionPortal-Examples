@@ -54,6 +54,7 @@ examples.tar
 * EX3_SSH_MgmtIntBuilder
 * EX4_mySQL_MgmtIntBuilder
 * EX5_VxlanBuilder
+* EX6_BasicBuilder
 
 ## User provided examples
 * free_ports
