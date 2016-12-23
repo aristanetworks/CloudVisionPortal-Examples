@@ -1,0 +1,288 @@
+configlet = 'BuildMLAG'
+
+# Import CVP specific libraries
+from cvplibrary import CVPGlobalVariables, Form, GlobalVariableNames, ipaddress
+# Import standard Python libraries
+from jsonrpclib import Server
+import re
+import time
+
+def getglobalvars():
+  '''
+  Get CVP global variables which are referenced in main and other functions. 
+  '''
+  
+  ztp = CVPGlobalVariables.getValue( GlobalVariableNames.ZTP_STATE )
+
+  if ztp == 'true':
+    user = CVPGlobalVariables.getValue( GlobalVariableNames.ZTP_USERNAME )
+    paswd = CVPGlobalVariables.getValue( GlobalVariableNames.ZTP_PASSWORD )
+  else:
+    user = CVPGlobalVariables.getValue( GlobalVariableNames.CVP_USERNAME )
+    paswd = CVPGlobalVariables.getValue( GlobalVariableNames.CVP_PASSWORD )
+    
+  ip = CVPGlobalVariables.getValue( GlobalVariableNames.CVP_IP )
+  mac = CVPGlobalVariables.getValue( GlobalVariableNames.CVP_MAC )
+
+  serial = CVPGlobalVariables.getValue( GlobalVariableNames.CVP_SERIAL )
+  
+  labels = CVPGlobalVariables.getValue( GlobalVariableNames.CVP_SYSTEM_LABELS )
+  
+  return ztp, user, paswd, ip, mac, serial, labels
+
+def str2int(text):
+  '''
+  Test and convert a string to an int if it contains digits. Referenced in findnextsubnet, main and natural_keys functions to convert various form inputs or regex parsing results to integers later used in calculations and to properly sort cablemap lists.  
+  '''
+  return int(text) if text.isdigit() else text
+  
+def buildl2vlan(vlanid, vlanname):
+  '''
+  Build a typical L2 vlan.
+  Assumes Vlan4092 - 4094 are reserved for CVX X-connect, L3 X-connect and MLAG respectively.
+  '''
+  l2 = 'vlan %s\n' % vlanid
+  l2 += '  state active\n'
+  l2 += '  name %s\n' % vlanname
+  if re.match('^409[2-4]$', str(vlanid)) is not None:
+    l2 += '  trunk group %s\n' % vlanname
+  l2 += '!\n'
+  return l2
+
+
+def buildl3int(l3int, l3desc, l3speed = None, l3ip = None, l3mask = None, l3vrf = 'default', varpip = None):
+  '''
+  Build a typical L3 interface. l3int passed from other functions can be a physical ethernet/management interface, Loopback, Port-Channel or SVI. Need to add ip address virtual for vxlan-enabled networks once it is determined how, where and to what extent vxlan will be used. 
+  '''
+  l3 = 'interface %s\n' % l3int
+  if re.match('^Ethernet.', l3int) is not None:
+    l3 += '  no switchport\n'
+    if l3speed == 100:
+      l3 += '  speed forced 100gfull\n'
+    elif l3speed == 50:
+      l3 += '  speed forced 50gfull\n' 
+    elif l3speed == 40:
+      l3 += '  speed forced 40gfull\n'
+    elif l3speed == 25:
+      l3 += '  speed forced 25gfull\n' 
+    else:
+      l3 += '  default speed\n'
+    l3 += '  default switchport\n'
+    l3 += '  default channel-group\n'
+    l3 += '  no switchport\n'
+  l3 += '  description %s\n' % l3desc
+  l3 += '  vrf forwarding %s\n' % l3vrf
+  if l3ip is not None:
+    l3 += '  ip address %s/%s\n' % (l3ip, l3mask)
+  else:
+    l3 += '  default ip address\n'
+  if re.match('^Vlan.', l3int) is not None and varpip is not None:
+    l3 += '  ip virtual-router address %s\n' % varpip
+  if re.match('^Vlan4094$', l3int) is not None:
+    l3 += '  no autostate\n'
+  if re.match('^Management.', l3int) is None:
+    l3 += '  mtu 9214\n'
+  if l3ip is not None:
+    l3 += '  no shutdown\n'
+  else:
+    l3 += '  shutdown\n'
+  l3 += '!\n'
+  return l3
+
+def addbgpnet(asn, network, mask, vrf = 'default'):
+  '''
+  Add a network statement to advertise prefixes into bgp.
+  '''
+  bgp = 'router bgp %s\n' % asn
+
+  if re.match('^default$', vrf) is None:
+    bgp += '  vrf %s\n' % vrf
+  bgp += '    network %s/%s\n' % (network, mask)
+  return bgp
+  
+def addbgppeer(asn, peer, peergrp, desc, vrf = 'default', remoteasn = None, md5key = None):
+  '''
+  Add neighbor statements for interfaces expected to participate in routing.
+  '''
+  bgp = 'router bgp %s\n' % asn
+
+  if re.match('^default$', vrf) is None:
+    bgp += '  vrf %s\n' % vrf
+
+  if peergrp is not None:
+    bgp += '    neighbor %s description %s\n' % (peer, desc)
+    bgp += '    neighbor %s peer-group %s\n' % (peer, peergrp)
+    if remoteasn is not None:
+      bgp += '    neighbor %s remote-as %s\n' % (peer, remoteasn)
+  else:
+    bgp += '    neighbor %s description %s\n' % (peer, desc)
+    bgp += '    neighbor %s remote-as %s\n' % (peer, remoteasn)
+    bgp += '    neighbor %s next-hop-self\n' % peer
+    bgp += '    neighbor %s send-community\n'  % peer
+    bgp += '    neighbor %s fall-over bfd\n'  % peer
+    bgp += '    neighbor %s soft-reconfiguration inbound\n' % peer
+    if md5key is not None:
+      bgp += '    neighbor %s password %s\n' % (peer, md5key)
+  return bgp
+
+def buildmlag(hostname, mlagints, mlagspeed, mlagsubnet, asn, mlagvrf, buildl3transit):
+  '''
+  Assemble a given list of mlagints and mlagspeed into a Port-Channel, generate a L3 crossconnect(Vlan4093) with applicable bgp routing configuration, a dedicated mlag connection(Vlan4094) and mlag configuration. Most variables passed are just used to generate interface descriptions and mlag domain name.
+  '''
+
+  id = int(hostname[-2:])
+  
+  if id % 2 == 1:
+    mlaglocal = mlagsubnet[0]
+    mlagpeer = mlagsubnet[1]
+    if buildl3transit:
+      l3local = mlagsubnet[2]
+      l3peer = mlagsubnet[3]
+    l3desc = '%s%02d' % (hostname[:-2], id + 1)
+    mlagdomain = '%s%02d' % (hostname[:-2], id)
+  else:
+    mlaglocal = mlagsubnet[1]
+    mlagpeer = mlagsubnet[0]
+    if buildl3transit:
+      l3local = mlagsubnet[3]
+      l3peer = mlagsubnet[2]
+    l3desc = '%s%02d' % (hostname[:-2], id - 1)
+    mlagdomain = '%s%02d' % (hostname[:-2], id - 1)
+      
+  mlag = 'ip virtual-router mac-address 00:1C:73:00:00:99\n'
+  mlag += '!\n'
+
+  if buildl3transit:
+    mlag += buildl2vlan(4093, str('%sXconnect' % l3desc)) 
+  mlag += buildl2vlan(4094, str('%sMLAG' % mlagdomain))
+  mlag += 'no spanning-tree vlan 4094\n'
+  mlag += '!\n'
+  
+  for port in mlagints:
+    mlag += 'interface %s\n' % port
+    if mlagspeed == 100:
+      mlag += '  speed forced 100gfull\n'
+    elif mlagspeed == 50:
+      mlag += '  speed forced 50gfull\n'
+    elif mlagspeed == 40:
+      mlag += '  speed forced 40gfull\n'
+    elif mlagspeed == 25:
+      mlag += '  speed forced 25gfull\n'
+    mlag += '  description %s_%s\n' % (l3desc, port)
+    mlag += '  switchport\n'
+    mlag += '  default switchport access vlan\n'
+    mlag += '  channel-group 2000 mode on\n'
+    mlag += '  no shutdown\n'
+    mlag += '!\n'
+    
+  mlag += 'interface Port-Channel2000\n'
+  mlag += '  description %s_Port-Channel2000\n' % l3desc
+  mlag += '  switchport\n'
+  mlag += '  default switchport access vlan\n'
+  mlag += '  switchport mode trunk\n'
+  mlag += '  switchport trunk group %s\n' % str('%sXconnect' % l3desc)
+  mlag += '  switchport trunk group %s\n' % str('%sMLAG' % mlagdomain)
+  mlag += '  no shutdown\n'
+  mlag += '!\n'
+  
+  if buildl3transit:
+    l3int = 'Vlan4093'
+    mlag += buildl3int(l3int, str('%s_Vlan4093' % l3desc), 0, l3local, 31, mlagvrf)
+    
+  l3int = 'Vlan4094'
+  mlag += buildl3int(l3int, str('%s_Vlan4094' % l3desc), 0, mlaglocal, 31, mlagvrf)  
+
+  mlag += 'mlag configuration\n'
+  mlag += '  domain-id %s\n' % mlagdomain
+  mlag += '  local-interface Vlan4094\n'
+  mlag += '  peer-address %s\n' % mlagpeer
+  mlag += '  peer-link Port-Channel2000\n'
+  mlag += '  no shutdown\n'
+  
+  bgp = addbgpnet(asn, mlagsubnet[0], 31, mlagvrf)
+  if buildl3transit:
+    bgp += addbgpnet(asn, mlagsubnet[2], 31, mlagvrf)
+    
+  if not buildl3transit:
+    bgp += addbgppeer(asn, mlagpeer, 'iBGP', l3desc, mlagvrf)
+  else:
+    bgp += addbgppeer(asn, l3peer, 'iBGP', l3desc, mlagvrf)
+
+  return mlag, bgp
+
+def main():
+  # Set golbal variables
+  ztp, user, paswd, ip, mac, serial, labels = getglobalvars( )
+
+  # Read form inputs
+  mlagints = str(Form.getFieldById('mlagints').getValue())
+  mlagints = mlagints.split(',')
+
+  # Perform json queries to erify mlagints list includes valid interface names.
+  switch = Server('https://%s:%s@%s/command-api' % (user, paswd, ip))
+
+  for int in mlagints:
+    try:
+      showcmd = "show interfaces %s" % int
+      runcmd = switch.runCmds(1, ["enable", { "cmd": showcmd}])[1]
+      valid = runcmd['interfaces']
+    except:
+      print '! ERROR: Unable to parse MLAG interfaces. Check device configuration and MLAG Interfaces form entry.'
+      return
+    else:
+      pass
+
+  mlagspeed = str(Form.getFieldById('mlagspeed').getValue())
+  mlagspeed = str2int(mlagspeed)
+  
+  mlagnet = str(Form.getFieldById('mlagnet').getValue())
+  
+  if Form.getFieldById('buildl3transit').getValue():
+    buildl3transit = True
+    mlagmask = 30
+  else:
+    buildl3transit = False
+    mlagmask = 31
+
+  # Confirm mlagnet input follows appropriate subnet boundries.
+  try:
+    list(ipaddress.IPv4Network(str('%s/%s' % (mlagnet, mlagmask))))
+  except:
+    print '! ERROR: Unable to determine subnet boundry.  Confirm Switch Function and MLAG Subnet are correct.'
+    return
+  else:
+    mlagsubnet = list(ipaddress.IPv4Network(str('%s/%s' % (mlagnet, mlagmask))))
+    
+  if len(str(Form.getFieldById('mlagvrf').getValue())):
+    mlagvrf = str(Form.getFieldById('mlagvrf').getValue())
+  else:
+    mlagvrf = 'default'
+
+  # Perform json query to get device hostname. Used in buildmlag function.
+  showcmd = "show hostname"
+  runcmd = switch.runCmds(1, ["enable", { "cmd": showcmd}])[1]
+  hostname = runcmd['hostname']
+  
+  # Perform json query to get existing BGP asn.  Used in buildmlag function.
+  showcmd = "show ip bgp summary vrf %s" % mlagvrf
+  runcmd = switch.runCmds(1, ["enable", { "cmd": showcmd}])[1]
+  asn = runcmd['vrfs'][mlagvrf]['asn']
+
+  # Use functions and form inputs to assemble configuration.
+  summarymsg = '! %s UTC\n' % (time.strftime("%c"))
+  summarymsg += '! Configlet = %s\n' % configlet
+  summarymsg += '! Device = %s\n' % hostname
+  
+  mlag = buildmlag(hostname, mlagints, mlagspeed, mlagsubnet, asn, mlagvrf, buildl3transit)
+  
+  mlagcfg = mlag[0]
+  routingcfg = mlag[1]
+
+  # Print derived configuration in similar order to show running-config output.      
+  print summarymsg
+  print
+  print mlagcfg
+  print
+  print routingcfg
+
+main()
