@@ -1,0 +1,50 @@
+load-interval default 5
+!
+no logging console
+!
+logging vrf MGMT host 10.1.16.253
+!
+default ip name-server
+ip name-server vrf MGMT 10.1.16.253
+ip domain-name lab.local
+!
+! Sync to Google public ntp servers and smoothly handle leap-smeared time.  See https://developers.google.com/time/.
+ntp server vrf MGMT 216.239.35.0
+ntp server vrf MGMT 216.239.35.4
+ntp server vrf MGMT 216.239.35.8
+ntp server vrf MGMT 216.239.35.12
+!
+vlan 1
+  state suspend
+!
+banner login
+=================================== WARNING ===================================
+This computer system including all related equipment, network devices
+(specifically including Internet access), are provided only for authorized
+use.
+
+All computer systems may be monitored for all lawful purposes, including to
+ensure that their use is authorized, for management of the system, to 
+facilitate protection against unauthorized access, and to verify security
+procedures, survivability and operational security.\nMonitoring includes active
+attacks by authorized personnel and their entities to test or verify the
+security of the system. During monitoring, information may be examined,
+recorded, copied and used for authorized purposes.\nAll information including
+personal information, placed on or sent over this system may be monitored. Uses
+of this system, authorized or unauthorized, constitutes consent to monitoring
+of this system.
+
+Unauthorized use may subject you to criminal prosecution. Evidence of any
+such unauthorized use collected during monitoring may be used for 
+administrative, criminal or other adverse action. Use of this system 
+constitutes consent to monitoring for these purposes.
+=================================== WARNING ===================================
+EOF
+!
+management console
+  idle-timeout 10
+!
+management api http-commands
+  protocol https
+  no shutdown
+!
