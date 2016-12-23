@@ -30,39 +30,66 @@ def main():
 
   hostname = str(Form.getFieldById('hostname').getValue())
 
+  #Prompt for management interface. If no entry is provided, default to Management interfaces.
   if len(Form.getFieldById('mgmtint').getValue()):
     mgmtint = str(Form.getFieldById('mgmtint').getValue())
   else:
     for label in labels:
-      if re.match('^DCS\-.', label) is not None:
+      if re.match('^CVX$|^DCS\-.|vEOS', label) is not None:
         model = label
         break
+      
     if re.match('^DCS\-73.|^DCS\-75,', model) is not None:
       mgmtint = 'Management0'
     else:
       mgmtint = 'Management1'
   
   mgmtip = str(Form.getFieldById('mgmtip').getValue())
-  
-  mgmtdesc = str(Form.getFieldById('mgmtdesc').getValue())
 
+  switch = Server('https://%s:%s@%s/command-api' % (user, paswd, ip))
+  
+  try:
+    showcmd = "show ip interface %s" % mgmtint
+    runcmd = switch.runCmds(1, ["enable", { "cmd": showcmd}])[1]
+    mgmtinfo = runcmd['interfaces'] 
+  except:
+    print '! ERROR: Unable to identify management interface. Check device configuration and verify form inputs.'
+    return 
+  else:
+    if len(mgmtinfo) > 1:
+      print '! ERROR: Unable to identify management interface. Check device configuration and verify form inputs.'
+    else:
+      for interface, info in mgmtinfo.items():
+        mgmtint = interface
+        mgmtmask = info['interfaceAddress']['primaryIp']['maskLen']
+
+  try:    
+    showcmd = "show ip route 0.0.0.0/0"
+    runcmd = switch.runCmds(1, ["enable", { "cmd": showcmd}])[1]
+  except:
+    print '! ERROR: Unable to determine default route. Check dhcp scope configuration.'
+    return 
+  else:
+    mgmtgw = runcmd['vrfs']['default']['routes']['0.0.0.0/0']['vias'] \ [ 0 ]['nexthopAddr']
+    
   if len(Form.getFieldById('mgmtvrf').getValue()):
     mgmtvrf = str(Form.getFieldById('mgmtvrf').getValue())
   else:
-    mgmtvrf = 'default'
+    mgmtvrf = 'MGMT'
 
   basecfg = 'hostname %s\n' % hostname
   basecfg += '!\n'
   
   if re.match('^default$', mgmtvrf) is None:
     basecfg += 'vrf definition %s\n' % mgmtvrf
-    if re.match('^management', mgmtvrf) is not None:
+    if re.match('^MGMT', mgmtvrf) is not None:
       basecfg += '  rd 1:1\n'
     else:
       basecfg += '  rd 2:1\n'
     basecfg += '!\n'
   
-  if re.match('Management0|Management1', mgmtint) is None:
+  # If managing via an SVI, strip the numeric from mgmtint variable and use the resultant to create the L2 VLAN.
+  if re.match('^v.|^V.', mgmtint) is not None:
     vlanid = re.findall('[0-9]+', mgmtint)
     basecfg += 'vlan %s\n' % vlanid[0]
     basecfg += '  state active\n'
@@ -70,18 +97,15 @@ def main():
     basecfg += '!\n'    
     
   basecfg += 'interface %s\n' % mgmtint
-  if re.match('Management0|Management1', mgmtint) is None:
-    basecfg += '  description %s\n' % mgmtdesc
-  basecfg += '  ip address %s/23\n' % mgmtip
+  if re.match('^e.|^E.', mgmtint) is not None:
+    basecfg += '  no switchport\n'
+  basecfg += '  description %s\n' % serial
   basecfg += '  vrf forwarding %s\n' % mgmtvrf
+  basecfg += '  ip address %s/%s\n' % (mgmtip, mgmtmask)
   basecfg += '  no shutdown\n'
   basecfg += '!\n'
   
-  switch = Server('https://%s:%s@%s/command-api' % (user, paswd, ip))
-  showcmd = "show ip route 0.0.0.0/0"
-  runcmd = switch.runCmds(1, ["enable", { "cmd": showcmd}])[1]
-  mgmtgw = runcmd['vrfs']['default']['routes']['0.0.0.0/0']['vias'] \ [ 0 ]['nexthopAddr']
-  basecfg += 'ip route vrf %s 0.0.0.0/0 %s\n' % (mgmtvrf, mgmtgw)
+  basecfg += 'ip route vrf %s 0.0.0.0/0 %s %s\n' % (mgmtvrf, re.sub(r'\s+', '', mgmtint), mgmtgw)
   basecfg += '!\n'
   
   if re.match('^default$', mgmtvrf) is None:
