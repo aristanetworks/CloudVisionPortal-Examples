@@ -55,6 +55,7 @@ examples.tar
 * EX4_mySQL_MgmtIntBuilder
 * EX5_VxlanBuilder
 * EX6_BasicBuilder
+* EX7_BuildMLAG
 
 ## User provided examples
 * free_ports
