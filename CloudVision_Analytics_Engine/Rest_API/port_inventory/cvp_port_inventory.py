@@ -82,6 +82,8 @@ HEADERS = {'Accept' : 'application/json',
 
 # CloudVision Analytics Engine Sysdb path to ARP table
 PATH_ARP = 'Smash/arp/status/arpEntry'
+# CloudVision Analytics Engine Sysdb path to l2 mac table
+PATH_MAC = 'Smash/bridging/status/smashFdbStatus'
 # CloudVision Analytics Engine Sysdb path to switch hostname
 PATH_HOSTNAME_CONFIG = 'Sysdb/sys/net/config'
 # CloudVision Analytics Engine Sysdb path to Interface Status.
@@ -510,7 +512,47 @@ def get_interface_arp(session, switch):
             info[interface] = [entry]
     return info
 
-def get_interface_remote_info(arp, lldp, interface):
+def get_interface_mac(session, switch):
+    ''' Get the MACs from the MAC table for all interfaces on the switch.
+
+        Args:
+            session (obj): A request session object.
+            switch (str): The device id (serial number) of the switch.
+
+        Returns:
+            A dict keyed by the Interface Name with a value consisting of
+            an array of dicts containing empty IP address and the MAC address.
+            Returns an empty array if there are no entries found.
+
+        Raises:
+            CvpApiError: A CvpApiError is raised if there was a JSON error.
+            CvpRequestError: A CvpRequestError is raised if the request
+                is not properly constructed.
+    '''
+    # Get the MAC info
+    url = 'http://%s%s/%s/%s' % (CVP_HOST, AERIS, switch, PATH_MAC)
+    response = get(session, url)
+    is_good_response(response, 'GET')
+
+    # Process the ARP table and add the entries.
+    data = response.json()['startState']['updates']
+    info = {}
+    for mac_entry in data:
+        mac_addr = data[mac_entry]['_key']['addr']
+        interface = data[mac_entry]['_value']['intf']
+        entry_type = data[mac_entry]['_value']['entryType']['Name']
+        if entry_type != 'learnedDynamicMac':
+            continue
+
+        entry = {'dev_id': ' ' * 15, 'port_id': mac_addr}
+        if interface in info:
+            info[interface].append(entry)
+        else:
+            info[interface] = [entry]
+    return info
+
+
+def get_interface_remote_info(arp, mac, lldp, interface):
     ''' Get the Remote Device ID and Remote Port ID for the specified
         interface on the given switch. First try to get the information
         via LLDP ('show lldp neighbor'), if not available, get the info
@@ -518,8 +560,9 @@ def get_interface_remote_info(arp, lldp, interface):
         entries.
 
         Args:
-            arp (dict): The LLDP info for the switch.
-            lldp (dict): The ARP table info for the switch.
+            arp (dict): The ARP table for the switch.
+            mac (dict): The MAC table for the switch
+            lldp (dict): The LLDP info info for the switch.
             interface (str): The name of the interface.
 
         Returns:
@@ -538,6 +581,10 @@ def get_interface_remote_info(arp, lldp, interface):
     # Check the ARP info and return the entry if it exists
     if interface in arp:
         return arp[interface]
+
+    # Check the MAC info and return the entry if it exists
+    if interface in mac:
+        return mac[interface]
 
     # Nothing, return a blank entry
     return [{'dev_id': ' ' * 15, 'port_id': ' ' * 15}]
@@ -627,10 +674,11 @@ def main():
         interfaces = get_interface_list(session, sw_sn)
         lldp = get_interface_lldp(session, sw_sn)
         arp = get_interface_arp(session, sw_sn)
+        macs = get_interface_mac(session, sw_sn)
         for interface in sorted(interfaces, cmp=compare_interfaces):
             config = get_interface_config(session, sw_sn, interface)
             status = get_interface_status(session, sw_sn, interface)
-            remote = get_interface_remote_info(arp, lldp, interface)
+            remote = get_interface_remote_info(arp, macs, lldp, interface)
             # Get the first remote entry
             dev_id = remote[0]['dev_id']
             port_id = remote[0]['port_id']
