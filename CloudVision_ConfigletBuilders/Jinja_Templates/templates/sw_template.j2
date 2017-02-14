@@ -1,0 +1,58 @@
+
+hostname {{ hostname }}
+
+interface Loopback0
+   description IPV4 Management Loopback
+   ip address {{ loopback0 }}/32
+!
+interface Loopback60
+   description IPV6 Management Loopback
+   ipv6 address {{ loopback60 }}/128
+!
+
+{% for key,value in  bgpdata.items() %}
+{% for item in value %}
+interface {{ item[3] }}
+description Connection_to_{{item[5]}}
+no switchport
+ip address  {{ item[1] }}/30
+ipv6 address {{ item[2] }}/64
+no shutdown
+{% endfor %}
+{% endfor %}
+
+router bgp 65006
+   router-id {{ loopback0 }}
+   bgp log-neighbor-changes
+   maximum-paths 32
+   neighbor v4_to_spine peer-group
+   neighbor v4_to_spine remote-as 65000
+   neighbor v4_to_spine password arista
+   neighbor v4_to_spine send-community
+   neighbor v4_to_spine fall-over bfd
+   neighbor v6_to_spine peer-group
+   neighbor v6_to_spine remote-as 65000
+   neighbor v6_to_spine password arista
+   neighbor v6_to_spine send-community
+   neighbor v6_to_spine fall-over bfd
+   address-family ipv4
+     neighbor v4_to_spine activate
+     no neighbor v6_to_spine activate
+   !
+   {% for key,value in  bgpdata.items() %}
+   {% for item in value %}
+   neighbor {{ item[6] }} peer-group v4_to_spine
+   neighbor {{ item[6]}} description {{ item[5] }}
+   {% endfor %}
+   {% endfor %}
+   !
+   address-family ipv6
+     neighbor v6_to_spine activate
+     no neighbor v4_to_spine activate
+   !
+   {% for key,value in  bgpdata.items() %}
+   {% for item in value %}
+   neighbor {{ item[7] }} peer-group v6_to_spine
+   neighbor {{ item[7]}} description {{ item[5] }}
+   {% endfor %}
+   {% endfor %}
