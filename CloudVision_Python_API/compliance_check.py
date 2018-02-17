@@ -1,3 +1,4 @@
+#!/usr/bin/env python
 #
 # Copyright (c) 2016, Arista Networks, Inc.
 # All rights reserved.
@@ -29,8 +30,6 @@
 # OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN
 # IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #
-
-#!/usr/bin/env python
 
 import cvp, optparse, smtplib
 from email.mime.text import MIMEText
