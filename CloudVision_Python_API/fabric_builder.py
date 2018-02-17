@@ -1,36 +1,4 @@
-#
-# Copyright (c) 2016, Arista Networks, Inc.
-# All rights reserved.
-#
-# Redistribution and use in source and binary forms, with or without
-# modification, are permitted provided that the following conditions are
-# met:
-#
-#   Redistributions of source code must retain the above copyright notice,
-#   this list of conditions and the following disclaimer.
-#
-#   Redistributions in binary form must reproduce the above copyright
-#   notice, this list of conditions and the following disclaimer in the
-#   documentation and/or other materials provided with the distribution.
-#
-#   Neither the name of Arista Networks nor the names of its
-#   contributors may be used to endorse or promote products derived from
-#   this software without specific prior written permission.
-#
-# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
-# "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
-# LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
-# A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL ARISTA NETWORKS
-# BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
-# CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
-# SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR
-# BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
-# WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE
-# OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN
-# IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-#
-
-#!/usr/bin/env python
+#!/usr/bin/python
 
 import cvp, optparse, json
 from string import Template
@@ -54,6 +22,7 @@ op.add_option( '-v', '--vxlanloopback', dest='vxlanloopback', action='store', he
 op.add_option( '-z', '--loopback', dest='loopback', action='store', help='Prefix to use for loobacks without last octet. Example: 192.168.0.', type='string')
 op.add_option( '-x', '--linknetworks', dest='linknetwork', action='store', help='Prefix to use for linknetworks without last octet. Example: 192.168.0.', type='string')
 op.add_option( '-t', '--type', dest='deploymenttype', action='store', help='Type of deployment, her for ip fabric HER, cvx for ip fabric cvx, evpn for ip fabric EVPN', type='string')
+op.add_option( '-b', '--cvxserver', dest='cvxserver', action='store', help='IP address on CVX server', type='string')
 op.add_option( '-a', '--debug', dest='debug', action='store', help='If debug is yes, nothing will actually be sent to CVP and proposed configs are written to terminal', type='string', default='no')
 
 opts, _ = op.parse_args()
@@ -75,6 +44,7 @@ vxlanloopback = opts.vxlanloopback
 loopback = opts.loopback
 linknetwork = opts.linknetwork
 deploymenttype = opts.deploymenttype
+cvxserver = opts.cvxserver
 debug = opts.debug
 
 parentName = 'Tenant'
@@ -112,11 +82,13 @@ for counter in range(1,no_spine+1):
 		neighbor_dict['neighbor'] = leaf_name
 		link = linknetwork + str(linksubnetcounter)
 		neighborlink = linknetwork + str(linksubnetcounter+1)
+		neighborint = str(linksubnetcounter+1)
 		linksubnetcounter = linksubnetcounter + 2
 		neighbor_dict['linknet'] = link
 		neighbor_dict['neighbor_ip'] = neighborlink
 		neighbor_dict['neighbor_interface'] = "Ethernet" + str(counter)
 		neighbor_dict['local_interface'] = spine_interface_name
+		neighbor_dict['neighbor_int'] = neighborint
 		if deploymenttype == "evpn":
 			neighbor_dict['asn'] = 65000 + counter2
 		interface_list.append(neighbor_dict)
@@ -138,6 +110,10 @@ for counter in range (1,no_leaf+1):
 		leaf_dict['asn'] = asn
 
 	Leafs.append(leaf_dict)
+
+vteplist = ""
+for leaf in Leafs:
+	vteplist = vteplist + " " + leaf['vxlan']
 
 if debug != "no":
 	print '%s' % ( json.dumps(DC, sort_keys=True, indent=4) )
@@ -188,6 +164,7 @@ interface Management1
 !
 interface $local_interface
    description $description
+   no switchport
    ip address $linknet/31
 !""").safe_substitute(Replacements)
 
@@ -273,11 +250,13 @@ router bgp 65000
 #
 
 for leaf in Leafs:
-	if deploymenttype == "cvx" or deploymenttype == "her":
+	if deploymenttype == "her":
 		Replacements = {
 						"hostname": leaf['name'],
 						"loopback": leaf['loopback'],
-						"vxlan": leaf['vxlan']
+						"vxlan": leaf['vxlan'],
+						"mgmtip": leaf['mgmt'],
+						"mgmtnetmask": mgmtnetmask
 						}
 		leaf_config = Template("""
 !
@@ -289,12 +268,19 @@ interface Loopback0
 interface Loopback1
    ip address $vxlan/32
 !
+interface Management1
+   ip address $mgmtip/$mgmtnetmask
+!
 """).safe_substitute(Replacements)
 
-	if deploymenttype == "evpn":
+	if deploymenttype == "cvx":
 		Replacements = {
 						"hostname": leaf['name'],
 						"loopback": leaf['loopback'],
+						"vxlan": leaf['vxlan'],
+						"mgmtip": leaf['mgmt'],
+						"mgmtnetmask": mgmtnetmask,
+						"cvxserver": cvxserver
 						}
 		leaf_config = Template("""
 !
@@ -302,6 +288,35 @@ hostname $hostname
 !
 interface Loopback0
    ip address $loopback/32
+!
+interface Loopback1
+   ip address $vxlan/32
+!
+interface Management1
+   ip address $mgmtip/$mgmtnetmask
+!
+management cvx
+   no shutdown
+   server host $cvxserver
+""").safe_substitute(Replacements)
+
+
+	if deploymenttype == "evpn":
+		Replacements = {
+						"hostname": leaf['name'],
+						"loopback": leaf['loopback'],
+						"mgmtip": leaf['mgmt'],
+						"mgmtnetmask": mgmtnetmask
+						}
+		leaf_config = Template("""
+!
+hostname $hostname
+!
+interface Loopback0
+   ip address $loopback/32
+!
+interface Management1
+   ip address $mgmtip/$mgmtnetmask
 !
 """).safe_substitute(Replacements)		
 #
@@ -325,14 +340,17 @@ interface Vxlan1
 #
 
 	if deploymenttype == "her":
-		Replacements = { "dummy": "dummy"
+		Replacements = { "dummy": "dummy",
+						"vteplist": vteplist
 						}
 		vxlan_add_to_leaf_config = Template("""
 interface Vxlan1
    vxlan source-interface Loopback1
    vxlan udp-port 4789
+   vxlan flood vtep$vteplist
 !
 """).safe_substitute(Replacements)
+		leaf_config = leaf_config + vxlan_add_to_leaf_config
 
 	if deploymenttype == "evpn":
 		Replacements = { "dummy": "dummy"
@@ -343,7 +361,6 @@ interface Vxlan1
    vxlan udp-port 4789
 !
 """).safe_substitute(Replacements)
-
 		leaf_config = leaf_config + vxlan_add_to_leaf_config
 
 	if deploymenttype == "her" or deploymenttype == "cvx":
@@ -358,7 +375,9 @@ router bgp 65001
    neighbor spines remote-as 65000
    neighbor spines allowas-in 3
    neighbor spines ebgp-multihop 4
-   neighbor spines maximum-routes 12000""").safe_substitute(Replacements)
+   neighbor spines maximum-routes 12000
+   redistribute connected
+""").safe_substitute(Replacements)
 
 	if deploymenttype ==  "evpn":
 		Replacements = {
@@ -377,7 +396,8 @@ router bgp $asn
    neighbor spines remote-as 65000
    neighbor spines fall-over bfd
    neighbor spines ebgp-multihop 4
-   neighbor spines maximum-routes 12000""").safe_substitute(Replacements)
+   neighbor spines maximum-routes 12000
+""").safe_substitute(Replacements)
 
 #
 # Build interface config for each leaf
@@ -395,6 +415,7 @@ router bgp $asn
 !
 interface $interface
    description $description
+   no switchport
    ip address $neighbor_ip/31
 !
 """).safe_substitute(Replacements)
@@ -402,7 +423,7 @@ interface $interface
 
 				if deploymenttype == "her" or deploymenttype == "cvx":
 					Replacements = {
-									"neighborip": interface['neighbor_ip']
+									"neighborip": linknetwork + str(int(interface['neighbor_int']) -1)
 									}
 					add_to_leaf_bgp_config = Template("""
    neighbor $neighborip peer-group spines""").safe_substitute(Replacements)
@@ -410,7 +431,7 @@ interface $interface
 
 				if deploymenttype == "evpn":
 					Replacements = {
-									"neighborip": interface['neighbor_ip']
+									"neighborip": linknetwork + str(int(interface['neighbor_int']) -1)
 					}
 					add_to_leaf_bgp_config = Template("""
    neighbor $neighborip peer-group spines""").safe_substitute(Replacements)
@@ -477,7 +498,7 @@ interface $interface
 		leaf_configlet_name = leaf['name'] + " configuration"
 		print "Contents of configlet %s:" % ( leaf_configlet_name )
 		print "%s" % ( leaf_config )
-		print "!"
+		print "!"  
 		print "!"
 		print "!"
 		leaf_bgp_configlet_name = leaf['name'] + " bgp configuration"
@@ -504,9 +525,6 @@ spanning-tree mode mstp
 !
 no aaa root
 !
-username becs privilege 15 secret 5 $1$edXmdxfz$lwH8NTWgA/q3DC8a456JN0
-username cvpadmin privilege 15 secret 5 $1$E6VAxeV9$rMrf9bnHXs0AkCM8RJ/kt0
-username df privilege 15 secret 5 $1$yorRLk72$Js0Z3mXVE0hydvFYGAQ0r.
 ip virtual-router mac-address 00:11:22:33:44:55
 !
 ip route 0.0.0.0/0 $defaultgw
