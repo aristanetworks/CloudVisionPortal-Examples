@@ -46,6 +46,9 @@ op.add_option( '-p', '--cvppassword', dest='cvppassword', action='store', help='
 op.add_option( '-n', '--name', dest='dcname', action='store', help='Name of DC to build', type='string')
 op.add_option( '-s', '--spines', dest='spines', action='store', help='Number of spine switches in DC fabric', type='int')
 op.add_option( '-l', '--leafs', dest='leafs', action='store', help='Number of leaf switch MLAG pairs in DC fabric', type='int')
+op.add_option( '-y', '--mlag', dest='mlag', action='store', help='If leafs are MLAG pairs or not', type='string')
+op.add_option( '-w', '--mlagnetwork', dest='mlagnetwork', action='store', help='Network to use for MLAG peer', type='string')
+op.add_option( '-q', '--mlagtrunkinterfaces', dest='mlagtrunkinterfaces', action='store', help='The two interfaces to use for MLAG trunk, ex. Ethernet3,Ethernet4', type='string')
 op.add_option( '-d', '--defaultgw', dest='defaultgw', action='store', help='Default gateway for management network', type='string')
 op.add_option( '-m', '--mgmtnetwork', dest='mgmtnet', action='store', help='Management network prefix without last octet. Example: 192.168.0.', type='string')
 op.add_option( '-o', '--mgmtnetmask', dest='mgmtnetmask', action='store', help='Management network netmask in bit length. Example: 24', type='int')
@@ -76,6 +79,9 @@ loopback = opts.loopback
 linknetwork = opts.linknetwork
 deploymenttype = opts.deploymenttype
 cvxserver = opts.cvxserver
+mlag = opts.mlag
+mlagnetwork = opts.mlagnetwork
+mlagtrunkinterfaces = opts.mlagtrunkinterfaces
 debug = opts.debug
 
 parentName = 'Tenant'
@@ -127,24 +133,56 @@ for counter in range(1,no_spine+1):
 	element_dict['interfaces'] = interface_list
 	DC.append(element_dict)
 
-for counter in range (1,no_leaf+1):
-	leaf_dict = {}
-	leaf_dict['name'] = name + "leaf" + str(counter)
-	leaf_dict['loopback'] = loopback + str(loopbackcounter)
-	loopbackcounter = loopbackcounter +1
-	leaf_dict['vxlan'] = vxlanloopback + str(vxlanloopbackcounter)
-	vxlanloopbackcounter = vxlanloopbackcounter +1
-	leaf_dict['mgmt'] = mgmtnetwork + str(mgmtnetworkcounter)
-	mgmtnetworkcounter = mgmtnetworkcounter + 1
-	if deploymenttype == "evpn":
-		asn = 65000 + counter
-		leaf_dict['asn'] = asn
+if mlag == "yes":
+	for counter in range (1,no_leaf+1):
+		leaf_dict = {}
+		leaf_dict['name'] = name + "leaf" + str(counter)
+		leaf_dict['loopback'] = loopback + str(loopbackcounter)
+		loopbackcounter = loopbackcounter +1
+		if vxlanloopbackcounter % 2 == 1:
+			mlaginterface = mlagnetwork + "0"
+			mlagpeer = mlagnetwork + "1"
+			leaf_dict['mlaginterface'] = mlaginterface
+			leaf_dict['mlagpeer'] = mlagpeer
+			leaf_dict['vxlan'] = vxlanloopback + str(vxlanloopbackcounter - 1)
+		else:
+			mlaginterface = mlagnetwork + "1"
+			mlagpeer = mlagnetwork + "0"
+			leaf_dict['mlaginterface'] = mlaginterface
+			leaf_dict['mlagpeer'] = mlagpeer
+			leaf_dict['vxlan'] = vxlanloopback + str(vxlanloopbackcounter)
+		vxlanloopbackcounter = vxlanloopbackcounter +1
+		leaf_dict['mgmt'] = mgmtnetwork + str(mgmtnetworkcounter)
+		mgmtnetworkcounter = mgmtnetworkcounter + 1
+		if deploymenttype == "evpn":
+			asn = 65000 + counter
+			if asn % 2 == 1:
+				leaf_dict['asn'] = asn
+			else:
+				leaf_dict['asn'] = asn - 1 
 
-	Leafs.append(leaf_dict)
+		Leafs.append(leaf_dict)
+
+if mlag == "no":
+	for counter in range (1,no_leaf+1):
+		leaf_dict= {}
+		leaf_dict['name'] = name + "leaf" + str(counter)
+		leaf_dict['loopback'] = loopback + str(loopbackcounter)
+		loopbackcounter = loopbackcounter +1
+		leaf_dict['vxlan'] = vxlanloopback + str(vxlanloopbackcounter)
+		vxlanloopbackcounter = vxlanloopbackcounter +1
+		leaf_dict['mgmt'] = mgmtnetwork + str(mgmtnetworkcounter)
+		mgmtnetworkcounter = mgmtnetworkcounter + 1
+		if deploymenttype == "evpn":
+			asn = 65000 + counter
+			leaf_dict['asn'] = asn
+
+		Leafs.append(leaf_dict)
 
 vteplist = ""
 for leaf in Leafs:
-	vteplist = vteplist + " " + leaf['vxlan']
+	if leaf['vxlan'] not in vteplist:
+		vteplist = vteplist + " " + leaf['vxlan']
 
 if debug != "no":
 	print '%s' % ( json.dumps(DC, sort_keys=True, indent=4) )
@@ -352,6 +390,50 @@ interface Management1
    ip address $mgmtip/$mgmtnetmask
 !
 """).safe_substitute(Replacements)		
+
+#
+# Create MLAG config when mlag is wanted
+#
+
+	if mlag == "yes":
+		mlagtrunkinterfacelist = mlagtrunkinterfaces.split(',')
+		mlagtrunkinterface1 = mlagtrunkinterfacelist[0]
+		mlagtrunkinterface2 = mlagtrunkinterfacelist[1]
+		Replacements = { "mlaginterface": leaf['mlaginterface'],
+						 "mlagpeer": leaf['mlagpeer'],
+						 "mlagtrunkinterface1": mlagtrunkinterface1,
+						 "mlagtrunkinterface2": mlagtrunkinterface2
+						}
+		mlag_add_to_leaf_config = Template("""
+!
+vlan 4094
+   name MLAGPEER
+   trunk group mlagpeer
+!
+no spanning-tree vlan 4094
+!
+interface port-channel 2000
+   switchport trunk group mlagpeer
+   switchport mode trunk
+!
+interface mlagtrunkinterface1
+   channel-group 2000 mode active
+!
+interface mlagtrunkinterface2
+   channel-group 2000 mode active
+!
+interface Vlan4094
+   ip address $mlaginterface/31
+!
+mlag
+   local-interface vlan 4094
+   peer-address $mlagpeer
+   peer-link port-channel 4094
+   domain-id MLAG
+!
+""").safe_substitute(Replacements)
+		leaf_config = leaf_config + mlag_add_to_leaf_config
+
 #
 # Create Vxlan1 config based on CVX
 #
@@ -396,7 +478,7 @@ interface Vxlan1
 """).safe_substitute(Replacements)
 		leaf_config = leaf_config + vxlan_add_to_leaf_config
 
-	if deploymenttype == "her" or deploymenttype == "cvx":
+	if deploymenttype == "her" or deploymenttype == "cvx" and mlag == "no":
 		Replacements = {
 						"routerid": leaf['loopback']
 						}
@@ -409,10 +491,29 @@ router bgp 65001
    neighbor spines allowas-in 3
    neighbor spines ebgp-multihop 4
    neighbor spines maximum-routes 12000
-   redistribute connected
-""").safe_substitute(Replacements)
+   redistribute connected""").safe_substitute(Replacements)
 
-	if deploymenttype ==  "evpn":
+	if deploymenttype == "her" or deploymenttype == "cvx" and mlag == "yes":
+		Replacements = {
+						"routerid": leaf['loopback'],
+						"mlagpeer": leaf['mlagpeer']
+						}
+		leaf_bgp_config = Template("""
+router bgp 65001
+   router-id $routerid
+   maximum-paths 4
+   neighbor spines peer-group
+   neighbor spines remote-as 65000
+   neighbor spines allowas-in 3
+   neighbor spines ebgp-multihop 4
+   neighbor spines maximum-routes 12000
+   neighbor mlag-neighbor peer-group
+   neighbor mlag-neighbor remote-as 65001
+   neighbor mlag-neighbor update-source vlan4094
+   neighbor $mlagpeer peer-group mlag-neighbor
+   redistribute connected""").safe_substitute(Replacements)
+
+	if deploymenttype ==  "evpn" and mlag == "no":
 		Replacements = {
 						"asn": leaf['asn'] ,
 						"routerid": leaf['loopback']
@@ -432,6 +533,27 @@ router bgp $asn
    neighbor spines ebgp-multihop 4
    neighbor spines maximum-routes 12000""").safe_substitute(Replacements)
 
+	if deploymenttype ==  "evpn" and mlag == "yes":
+		Replacements = {
+						"asn": leaf['asn'] ,
+						"routerid": leaf['loopback']
+						}
+		leaf_bgp_config = Template("""
+router bgp $asn
+   router-id $routerid
+   maximum-paths 4
+   neighbor EVPN peer-group
+   neighbor EVPN update-source Loopback0
+   neighbor EVPN ebgp-multihop
+   neighbor EVPN send-community extended
+   neighbor EVPN maximum-routes 12000 
+   neighbor mlag-neighbor remote-as $asn
+   neighbor mlag-neighbor update-source vlan4094
+   neighbor spines peer-group
+   neighbor spines remote-as 65000
+   neighbor spines fall-over bfd
+   neighbor spines ebgp-multihop 4
+   neighbor spines maximum-routes 12000""").safe_substitute(Replacements)
 #
 # Build interface config for each leaf
 #
