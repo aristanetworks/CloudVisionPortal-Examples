@@ -416,10 +416,10 @@ interface port-channel 2000
    switchport trunk group mlagpeer
    switchport mode trunk
 !
-interface mlagtrunkinterface1
+interface $mlagtrunkinterface1
    channel-group 2000 mode active
 !
-interface mlagtrunkinterface2
+interface $mlagtrunkinterface2
    channel-group 2000 mode active
 !
 interface Vlan4094
@@ -536,7 +536,8 @@ router bgp $asn
 	if deploymenttype ==  "evpn" and mlag == "yes":
 		Replacements = {
 						"asn": leaf['asn'] ,
-						"routerid": leaf['loopback']
+						"routerid": leaf['loopback'],
+						"mlagpeer": leaf['mlagpeer']
 						}
 		leaf_bgp_config = Template("""
 router bgp $asn
@@ -547,8 +548,10 @@ router bgp $asn
    neighbor EVPN ebgp-multihop
    neighbor EVPN send-community extended
    neighbor EVPN maximum-routes 12000 
+   neighbor mlag-neighbor peer-group
    neighbor mlag-neighbor remote-as $asn
    neighbor mlag-neighbor update-source vlan4094
+   neighbor $mlagpeer peer-group mlag-neighbor
    neighbor spines peer-group
    neighbor spines remote-as 65000
    neighbor spines fall-over bfd
