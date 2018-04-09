@@ -57,6 +57,8 @@ op.add_option( '-z', '--loopback', dest='loopback', action='store', help='Prefix
 op.add_option( '-x', '--linknetworks', dest='linknetwork', action='store', help='Prefix to use for linknetworks without last octet. Example: 192.168.0.', type='string')
 op.add_option( '-t', '--type', dest='deploymenttype', action='store', help='Type of deployment, her for ip fabric HER, cvx for ip fabric cvx, evpn for ip fabric EVPN', type='string')
 op.add_option( '-b', '--cvxserver', dest='cvxserver', action='store', help='IP address on CVX server', type='string')
+op.add_option( '-e', '--is-virtual', dest='virtual', action='store', help='If virtual is yes, interface naming will fit vEOS-lab. If virtual is no, interface naming is adaptd to 1RU and 2RU leafs and spines', type='string', default='yes')
+op.add_option( '-f', '--no-uplinks', dest='uplinks', action='store', help='Number of uplinks from leaf to each spine', type='int')
 op.add_option( '-a', '--debug', dest='debug', action='store', help='If debug is yes, nothing will actually be sent to CVP and proposed configs are written to terminal', type='string', default='no')
 
 opts, _ = op.parse_args()
@@ -83,6 +85,8 @@ mlag = opts.mlag
 mlagnetwork = opts.mlagnetwork
 mlagtrunkinterfaces = opts.mlagtrunkinterfaces
 debug = opts.debug
+virtual = opts.virtual
+uplinks = opts.uplinks
 
 parentName = 'Tenant'
 my_spine_container_name = name + " Spine"
@@ -111,26 +115,38 @@ for counter in range(1,no_spine+1):
 	loopbackcounter = loopbackcounter + 1
 	element_dict['mgmt'] = mgmtnetwork + str(mgmtnetworkcounter)
 	mgmtnetworkcounter = mgmtnetworkcounter + 1
+	counter3 = 1
 
 	for counter2 in range(1,no_leaf+1):
-		spine_interface_name = "Ethernet"+str(counter2)
-		leaf_name = name + "leaf" + str(counter2)
-		neighbor_dict = {}
-		neighbor_dict['neighbor'] = leaf_name
-		link = linknetwork + str(linksubnetcounter)
-		neighborlink = linknetwork + str(linksubnetcounter+1)
-		neighborint = str(linksubnetcounter+1)
-		linksubnetcounter = linksubnetcounter + 2
-		neighbor_dict['linknet'] = link
-		neighbor_dict['neighbor_ip'] = neighborlink
-		neighbor_dict['neighbor_interface'] = "Ethernet" + str(counter)
-		neighbor_dict['local_interface'] = spine_interface_name
-		neighbor_dict['neighbor_int'] = neighborint
-		if deploymenttype == "evpn":
-			neighbor_dict['asn'] = 65000 + counter2
-		interface_list.append(neighbor_dict)
+		for i in range(1,uplinks+1):
+			if virtual == "no":
+				spine_interface_name = "Ethernet"+str(counter3)+"/1"
+			else:
+				spine_interface_name = "Ethernet"+str(counter3)
+
+			leaf_name = name + "leaf" + str(counter2)
+			neighbor_dict = {}
+			neighbor_dict['neighbor'] = leaf_name
+			link = linknetwork + str(linksubnetcounter)
+			neighborlink = linknetwork + str(linksubnetcounter+1)
+			neighborint = str(linksubnetcounter+1)
+			linksubnetcounter = linksubnetcounter + 2
+			neighbor_dict['linknet'] = link
+			neighbor_dict['neighbor_ip'] = neighborlink
+			if virtual == "no":
+				neighbor_dict['neighbor_interface'] = "Ethernet" + str(i + 48 + ((counter - 1) * uplinks)) + "/1"
+			else:
+				neighbor_dict['neighbor_interface'] = "Ethernet" + str(i + ((counter - 1) * uplinks))
+			
+			neighbor_dict['local_interface'] = spine_interface_name
+			neighbor_dict['neighbor_int'] = neighborint
+			if deploymenttype == "evpn":
+				neighbor_dict['asn'] = 65000 + counter2
+			interface_list.append(neighbor_dict)
+			counter3 = counter3 + 1
 		
-	element_dict['interfaces'] = interface_list
+		element_dict['interfaces'] = interface_list
+	
 	DC.append(element_dict)
 
 if mlag == "yes":
