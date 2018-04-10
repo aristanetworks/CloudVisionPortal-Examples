@@ -444,7 +444,7 @@ interface Vlan4094
 mlag
    local-interface vlan 4094
    peer-address $mlagpeer
-   peer-link port-channel 4094
+   peer-link port-channel 2000
    domain-id MLAG
 !
 """).safe_substitute(Replacements)
