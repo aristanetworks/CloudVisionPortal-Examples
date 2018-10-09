@@ -1,4 +1,3 @@
-from cvplibrary import Form
 from cvplibrary import CVPGlobalVariables, GlobalVariableNames
 from cvplibrary import Device
 device_ip = CVPGlobalVariables.getValue(GlobalVariableNames.CVP_IP)
@@ -9,14 +8,9 @@ hostname = hostnameResponse['show hostname']['response']['hostname']
 intfsCmdList = [ "enable" , { "cmd" : "show interfaces Management1" } ]
 intfsResponse = device.runCmds(intfsCmdList)
 intfs = intfsResponse['show interfaces Management1']['response']
-mgmtIp = intfs['interfaces']['Management1']['interfaceAddress' ][ 0 ]      [ 'primaryIp' ]['address']
-mgmtMask = intfs[ 'interfaces' ][ 'Management1' ][ 'interfaceAddress' ][ 0 ]      [ 'primaryIp' ][ 'maskLen' ]
+mgmtIp = intfs['interfaces']['Management1']['interfaceAddress' ][ 0 ][ 'primaryIp' ]['address']
+mgmtMask = intfs[ 'interfaces' ][ 'Management1' ][ 'interfaceAddress' ][ 0 ][ 'primaryIp' ][ 'maskLen' ]
 mgmt =  'Management1'
-vrf = Form.getFieldById( 'vrf' ).getValue()
-if not vrf:
-   vrf = 'default'
 print "hostname %s" % hostname
 print "interface Management1"
-if vrf != 'default':
-   print ' vrf forwarding ' + vrf
 print " ip address %s/%d" % ( mgmtIp, mgmtMask )
