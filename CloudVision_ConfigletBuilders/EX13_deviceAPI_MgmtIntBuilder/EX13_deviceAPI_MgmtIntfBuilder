@@ -1,0 +1,16 @@
+from cvplibrary import CVPGlobalVariables, GlobalVariableNames
+from cvplibrary import Device
+device_ip = CVPGlobalVariables.getValue(GlobalVariableNames.CVP_IP)
+device = Device(device_ip)
+hostnameCmdList = [ "enable" , { "cmd" : "show hostname" } ]
+hostnameResponse = device.runCmds(hostnameCmdList)
+hostname = hostnameResponse['show hostname']['response']['hostname']
+intfsCmdList = [ "enable" , { "cmd" : "show interfaces Management1" } ]
+intfsResponse = device.runCmds(intfsCmdList)
+intfs = intfsResponse['show interfaces Management1']['response']
+mgmtIp = intfs['interfaces']['Management1']['interfaceAddress' ][ 0 ][ 'primaryIp' ]['address']
+mgmtMask = intfs[ 'interfaces' ][ 'Management1' ][ 'interfaceAddress' ][ 0 ][ 'primaryIp' ][ 'maskLen' ]
+mgmt =  'Management1'
+print "hostname %s" % hostname
+print "interface Management1"
+print " ip address %s/%d" % ( mgmtIp, mgmtMask )
