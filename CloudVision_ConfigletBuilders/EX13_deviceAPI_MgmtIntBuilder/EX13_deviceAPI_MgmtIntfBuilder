@@ -1,7 +1,18 @@
 from cvplibrary import CVPGlobalVariables, GlobalVariableNames
 from cvplibrary import Device
 device_ip = CVPGlobalVariables.getValue(GlobalVariableNames.CVP_IP)
-device = Device(device_ip)
+
+ztp = CVPGlobalVariables.getValue( GlobalVariableNames.ZTP_STATE );
+ip = CVPGlobalVariables.getValue( GlobalVariableNames.CVP_IP );
+
+if ztp == 'true':
+  user = CVPGlobalVariables.getValue( GlobalVariableNames.ZTP_USERNAME );
+  passwd = CVPGlobalVariables.getValue( GlobalVariableNames.ZTP_PASSWORD );
+else:
+  user = CVPGlobalVariables.getValue( GlobalVariableNames.CVP_USERNAME );
+  passwd = CVPGlobalVariables.getValue( GlobalVariableNames.CVP_PASSWORD );
+
+device = Device(device_ip,username=user,password=passwd)
 cmdList = [ "enable" , "show hostname", "show interfaces Management1" ]
 cmdResponse = device.runCmds(cmdList)
 hostname = cmdResponse[1]['response']['hostname']
