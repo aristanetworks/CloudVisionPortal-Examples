@@ -1,9 +1,8 @@
 from cvplibrary import CVPGlobalVariables, GlobalVariableNames
 from cvplibrary import Device
-device_ip = CVPGlobalVariables.getValue(GlobalVariableNames.CVP_IP)
 
+device_ip = CVPGlobalVariables.getValue(GlobalVariableNames.CVP_IP)
 ztp = CVPGlobalVariables.getValue( GlobalVariableNames.ZTP_STATE );
-ip = CVPGlobalVariables.getValue( GlobalVariableNames.CVP_IP );
 
 if ztp == 'true':
   user = CVPGlobalVariables.getValue( GlobalVariableNames.ZTP_USERNAME );
