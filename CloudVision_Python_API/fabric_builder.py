@@ -35,7 +35,31 @@ import cvp, optparse, json
 from string import Template
 
 #
-# Parse command line options
+# Support functions for main code
+#
+
+def configletExists( cvpServer , configlet_name ):
+	configlet_exist = 0
+	myConfiglets = cvpServer.getConfiglets()
+	for myConfiglet in myConfiglets:
+		if myConfiglet.name == configlet_name:
+			configlet_exist = 1
+	return configlet_exist
+
+def updateMyConfiglet( cvpServer , configlet_name , configlet_config ):
+	myConfiglet = cvpServer.getConfiglet( configlet_name )
+	myConfiglet.config = configlet_config
+	cvpServer.updateConfiglet( myConfiglet )
+
+def containerExists( cvpServer , container_name ):
+	container_exist = 0
+	myContainers = cvpServer.getContainers()
+	for myContainer in myContainers:
+		if myContainer.name == container_name:
+			container_exist = 1
+	return container_exist
+#
+# Parse command line options.
 #
 
 usage = 'usage: %prog [options]'
@@ -59,12 +83,23 @@ op.add_option( '-t', '--type', dest='deploymenttype', action='store', help='Type
 op.add_option( '-b', '--cvxserver', dest='cvxserver', action='store', help='IP address on CVX server', type='string')
 op.add_option( '-e', '--is-virtual', dest='virtual', action='store', help='If virtual is yes, interface naming will fit vEOS-lab. If virtual is no, interface naming is adaptd to 1RU and 2RU leafs and spines', type='string', default='yes')
 op.add_option( '-f', '--no-uplinks', dest='uplinks', action='store', help='Number of uplinks from leaf to each spine', type='int')
+op.add_option( '-g', '--offset', dest='offset', action='store', help='Which switch number to continue with when building next DC if IP resources are shared.', type='int',default=1)
+op.add_option( '-i', '--mgmt-ip', dest='mgmtip', action='store', help='Which IP to start on in MGMT subnet', type='int',default=1)
 op.add_option( '-a', '--debug', dest='debug', action='store', help='If debug is yes, nothing will actually be sent to CVP and proposed configs are written to terminal', type='string', default='no')
+op.add_option( '-4', '--syslogserver', dest='syslogserver', action='store', help='IP of syslogserver for logging from switches', type='string')
+op.add_option( '-k', '--snmp_private', dest='snmp_private', action='store', help='SNMP private community', type='string')
+op.add_option( '-r', '--snmp_public', dest='snmp_public', action='store', help='SNMP public community', type='string')
+op.add_option( '-1', '--primary_ntp', dest='primary_ntp', action='store', help='IP of primary NTP server', type='string')
+op.add_option( '-2', '--second_ntp', dest='second_ntp', action='store', help='IP of secondary NTP server', type='string')
+op.add_option( '-3', '--log_facility', dest='log_facility', action='store', help='Log facility for syslog', type='string')
+op.add_option( '-5', '--spine-start-asn', dest='spine_start_asn', action='store', help='Starting ASN for spine which also is offset for the rest of the Datacenter.', type='int')
+op.add_option( '-6', '--max-routes', dest='max_routes', action='store', help='Max routes to announce in underlay.', type='int')
+op.add_option( '-7', '--max-evpn-routes', dest='max_evpn_routes', action='store', help='Max routes to announce in EVPN.', type='int')
 
 opts, _ = op.parse_args()
 
 #
-# Assign command line options to variables and assign static variables
+# Assign command line options to variables and assign static variables.
 #
 
 host = opts.cvphostname
@@ -87,15 +122,35 @@ mlagtrunkinterfaces = opts.mlagtrunkinterfaces
 debug = opts.debug
 virtual = opts.virtual
 uplinks = opts.uplinks
+syslogserver = opts.syslogserver
+snmp_private = opts.snmp_private
+snmp_public = opts.snmp_public
+log_facility = opts.log_facility
+primary_ntp = opts.primary_ntp
+second_ntp = opts.second_ntp
+spine_start_asn = opts.spine_start_asn
+max_routes = opts.max_routes
+max_evpn_routes = opts.max_evpn_routes
 
 parentName = 'Tenant'
 my_spine_container_name = name + " Spine"
 my_leaf_container_name = name + " Leaf"
 dc_configlet_name = name + " Base config"
 configlet_list = []
+cvx_configlet_list = []
+leaf_configlet_list = []
+max_ecmp = no_spine * uplinks
 
 #
-# Build the DC list of switches in dictionary form
+# The first part of the code builds a dictionary representing first all the spines
+# and their relevant data to create their config.
+#
+# Second part of the code builds a dictionary representing first all the leafs
+# and their relevant data to create their config.
+#
+
+#
+# Build the DC list of spine switches in dictionary form.
 #
 
 linksubnetcounter = 0
@@ -140,14 +195,27 @@ for counter in range(1,no_spine+1):
 			
 			neighbor_dict['local_interface'] = spine_interface_name
 			neighbor_dict['neighbor_int'] = neighborint
-			if deploymenttype == "evpn":
-				neighbor_dict['asn'] = 65000 + counter2
+			
+			neighbor_asn = spine_start_asn + counter2
+			if neighbor_asn % 2 == 1:
+				neighbor_dict['asn'] = neighbor_asn
+			else:
+				neighbor_dict['asn'] = neighbor_asn - 1 
+			
 			interface_list.append(neighbor_dict)
 			counter3 = counter3 + 1
 		
 		element_dict['interfaces'] = interface_list
 	
 	DC.append(element_dict)
+
+#
+# Build the Leaf list of leaf switches in dictionary form.
+#
+
+#
+# If leafs are organised as MLAG pairs, build accordingly.
+#
 
 if mlag == "yes":
 	for counter in range (1,no_leaf+1):
@@ -170,14 +238,16 @@ if mlag == "yes":
 		vxlanloopbackcounter = vxlanloopbackcounter +1
 		leaf_dict['mgmt'] = mgmtnetwork + str(mgmtnetworkcounter)
 		mgmtnetworkcounter = mgmtnetworkcounter + 1
-		if deploymenttype == "evpn":
-			asn = 65000 + counter
-			if asn % 2 == 1:
-				leaf_dict['asn'] = asn
-			else:
-				leaf_dict['asn'] = asn - 1 
+		asn = spine_start_asn + counter
+		if asn % 2 == 1:
+			leaf_dict['asn'] = asn
+		else:
+			leaf_dict['asn'] = asn - 1 
 
 		Leafs.append(leaf_dict)
+#
+# If leafs are organised standalone, build accordingly.
+#
 
 if mlag == "no":
 	for counter in range (1,no_leaf+1):
@@ -189,16 +259,24 @@ if mlag == "no":
 		vxlanloopbackcounter = vxlanloopbackcounter +1
 		leaf_dict['mgmt'] = mgmtnetwork + str(mgmtnetworkcounter)
 		mgmtnetworkcounter = mgmtnetworkcounter + 1
-		if deploymenttype == "evpn":
-			asn = 65000 + counter
-			leaf_dict['asn'] = asn
+		asn = spine_start_asn + counter
+		leaf_dict['asn'] = asn
 
 		Leafs.append(leaf_dict)
 
-vteplist = ""
-for leaf in Leafs:
-	if leaf['vxlan'] not in vteplist:
-		vteplist = vteplist + " " + leaf['vxlan']
+#
+# Build a VTEP list for the HER use case.
+#
+
+if deploymenttype == "her":
+	vteplist = ""
+	for leaf in Leafs:
+		if leaf['vxlan'] not in vteplist:
+			vteplist = vteplist + " " + leaf['vxlan']
+
+#
+# If debug is activated, dump the dictionaries that represents the network to stdout 
+#
 
 if debug != "no":
 	print '%s' % ( json.dumps(DC, sort_keys=True, indent=4) )
@@ -214,6 +292,176 @@ if debug != "no":
 if debug == "no":
 	server = cvp.Cvp( host )
 	server.authenticate( user , password )
+
+#
+# Create needed configlets for the new DC
+#
+
+Replacements = {
+                "defaultgw": defaultgw,
+                "syslog": syslogserver,
+                "private": snmp_private,
+                "public": snmp_public,
+                "facility": log_facility,
+                "primary_ntp": primary_ntp,
+                "second_ntp": second_ntp               
+                }
+
+dc_base_config = Template("""
+!
+transceiver qsfp default-mode 4x10G
+!
+logging buffered 128000
+logging console informational
+logging format timestamp high-resolution
+logging facility $facility
+logging host $syslog
+logging source-interface Management1
+!
+snmp-server community $private rw
+snmp-server community $public ro
+!
+ntp server $primary_ntp prefer version 4
+ntp server $second_ntp version 4
+!
+spanning-tree mode mstp
+!
+no aaa root
+!
+ip virtual-router mac-address 00:11:22:33:44:55
+!
+ip route 0.0.0.0/0 $defaultgw
+ip routing
+!
+management api http-commands
+   protocol http
+   cors allowed-origin all
+   no shutdown
+""").safe_substitute(Replacements)
+
+if deploymenttype == "evpn":
+	Replacements = {
+    				"dummy":"dummy"
+                }
+
+	arbgp_config = Template("""
+!
+service routing protocols model multi-agent 
+!
+""").safe_substitute(Replacements)
+	dc_base_config = dc_base_config + arbgp_config
+
+#
+# Build standalone shared configlets for CVX use case
+#
+
+if deploymenttype == "cvx":
+	Replacements = {
+					"cvxserver": cvxserver
+					}
+
+	cvx_config = Template("""
+!
+management cvx
+   no shutdown
+   server host $cvxserver
+!
+""").safe_substitute(Replacements)
+
+#
+# Create Vxlan1 configlets based on CVX deployment type.
+#
+
+if deploymenttype == "cvx":
+	Replacements = { "dummy": "dummy"
+					}
+	vxlan_leaf_config = Template("""
+interface Vxlan1
+   vxlan source-interface Loopback1
+   vxlan udp-port 4789
+   vxlan controller-client
+!
+""").safe_substitute(Replacements)
+
+#
+# Create Vxlan1 config based on HER deployment type.
+#
+
+if deploymenttype == "her":
+	Replacements = { "dummy": "dummy",
+					 "vteplist": vteplist
+					}
+	vxlan_leaf_config = Template("""
+interface Vxlan1
+   vxlan source-interface Loopback1
+   vxlan udp-port 4789
+   vxlan flood vtep$vteplist
+!
+""").safe_substitute(Replacements)
+
+#
+# Create Vxlan1 config based on EVPN deployment type.
+#
+
+if deploymenttype == "evpn":
+	Replacements = { "dummy": "dummy"
+					}
+	vxlan_leaf_config = Template("""
+interface Vxlan1
+   vxlan source-interface Loopback1
+   vxlan udp-port 4789
+!
+""").safe_substitute(Replacements)
+
+# If debug is activated, only print config that should have gone into configlets,
+# do not actually create configlets. If debug is not activated, create configlets
+# and add them to CVP.
+#
+
+if debug == "no":
+	dc_configlet = cvp.Configlet( dc_configlet_name , dc_base_config  )
+	if configletExists( server , dc_configlet_name ):
+		updateMyConfiglet( server , dc_configlet_name , dc_base_config )
+		rebuild = 1
+	else:
+		server.addConfiglet( dc_configlet )
+		configlet_list.append( dc_configlet )
+		rebuild = 0
+
+	vxlan_configlet_name = name + " Interface VXLAN1 base configuration"
+	if rebuild == 1:
+		updateMyConfiglet ( server , vxlan_configlet_name , vxlan_leaf_config )
+	else:
+		vxlan_configlet = cvp.Configlet( vxlan_configlet_name, vxlan_leaf_config )
+		server.addConfiglet( vxlan_configlet )#
+
+	if deploymenttype == "cvx":
+		cvx_configlet_name = name + " CVX client configuration"
+		cvx_configlet = cvp.Configlet( cvx_configlet_name, cvx_config )
+		if configletExists( server , cvx_configlet_name ):
+			updateMyConfiglet( server , cvx_configlet_name , cvx_config )
+		else:
+			server.addConfiglet( cvx_configlet )
+			cvx_configlet_list.append( cvx_configlet )
+else:
+	print "Contents of configlet %s:" % ( dc_configlet_name )
+	print "%s" % ( dc_base_config )
+	print "!"
+	print "!"
+	print "!"
+	vxlan_configlet_name = name + " Interface VXLAN1 base configuration"
+	print "Contents of configlet %s:" % ( vxlan_configlet_name )
+	print "%s" % ( vxlan_leaf_config )
+	print "!"
+	print "!"
+	print "!"
+	if deploymenttype == "cvx":
+		cvx_configlet_name = name + " CVX client configuration"
+		print "Contents of configlet %s:" % ( cvx_configlet_name )
+		print "%s" % ( cvx_config )
+		print "!"
+		print "!"
+		print "!"
 
 #
 # Build base config configlets for spines and add them to CVP.
@@ -257,8 +505,11 @@ interface $local_interface
 
 	if debug == "no":
 		spine_configlet_name = spine_switch['name'] + " configuration"
-		spine_configlet = cvp.Configlet( spine_configlet_name , spine_base_config )
-		server.addConfiglet( spine_configlet )
+		if rebuild == 1:
+			updateMyConfiglet( server , spine_configlet_name , spine_base_config )
+		else:
+			spine_configlet = cvp.Configlet( spine_configlet_name , spine_base_config )
+			server.addConfiglet( spine_configlet )
 	else:
 		spine_configlet_name = spine_switch['name'] + " configuration"
 		print "Contents of configlet %s:" % ( spine_configlet_name )
@@ -267,26 +518,37 @@ interface $local_interface
 		print "!"
 		print "!"
 #
-# Create config unique for spine in cvx and her deployment types
+# Create configlets unique for spine in cvx and her deployment types
+# and add them to CVP.
 #
 
 	if deploymenttype == "her" or deploymenttype == "cvx":
 		Replacements = {
 						"routerid": spine_switch['loopback'],
-						"linknet": linknetwork + "0/24"
+						"linknet": linknetwork + "0/24",
+						"uplinks": uplinks,
+						"asn": spine_start_asn,
+						"max_routes": max_routes,
+						"max_ecmp": max_ecmp
 						}
 
 		spine_bgp_config = Template("""
-router bgp 65000
+router bgp $asn
    router-id $routerid
-   maximum-paths 4
-   bgp listen range $linknet peer-group leafs remote-as 65001
+   maximum-paths $max_ecmp ecmp $max_ecmp
    neighbor leafs peer-group
-   neighbor leafs allowas-in 3
-   neighbor leafs fall-over bfd
-   neighbor leafs maximum-routes 12000 
+   neighbor leafs maximum-routes $max_routes 
    redistribute connected""").safe_substitute(Replacements)
 
+		for interface in spine_switch['interfaces']:
+			Replacements = {
+							"neighbor": interface['neighbor_ip'],
+							"asn": interface['asn']
+							}
+			add_to_sping_bgp_config = Template("""
+   neighbor $neighbor peer-group leafs
+   neighbor $neighbor remote-as $asn""").safe_substitute(Replacements)
+			spine_bgp_config = spine_bgp_config + add_to_sping_bgp_config
 #
 # Create config unique for spine in evpn deployment type
 #
@@ -294,16 +556,27 @@ router bgp 65000
 	if deploymenttype == "evpn":
 		Replacements = {
 						"routerid": spine_switch['loopback'],
-						"linknet": linknetwork
+						"linknet": linknetwork,
+						"uplinks": uplinks,
+						"asn": spine_start_asn,
+						"max_routes": max_routes,
+						"max_evpn_routes": max_evpn_routes,
+						"max_ecmp": max_ecmp
 						}
 
 		spine_bgp_config = Template("""
-router bgp 65000
+router bgp $asn
    router-id $routerid
-   maximum-paths 4
+   maximum-paths $max_ecmp ecmp $max_ecmp
    neighbor leafs peer-group
-   neighbor leafs fall-over bfd
-   neighbor leafs maximum-routes 12000 
+   neighbor leafs maximum-routes $max_routes
+   neighbor EVPN peer-group
+   neighbor EVPN fall-over bfd
+   neighbor EVPN maximum-routes $max_evpn_routes
+   neighbor EVPN next-hop-unchanged
+   neighbor EVPN update-source Loopback0
+   neighbor EVPN ebgp-multihop 4
+   neighbor EVPN send-community extended
    redistribute connected""").safe_substitute(Replacements)
 
 		for interface in spine_switch['interfaces']:
@@ -316,10 +589,50 @@ router bgp 65000
    neighbor $neighbor remote-as $asn""").safe_substitute(Replacements)
 			spine_bgp_config = spine_bgp_config + add_to_sping_bgp_config
 
+		for leaf in Leafs:
+			Replacements = {
+							"neighbor": leaf['loopback'],
+							"asn": leaf['asn']
+							}
+			add_to_sping_bgp_config = Template("""
+   neighbor $neighbor peer-group EVPN
+   neighbor $neighbor remote-as $asn""").safe_substitute(Replacements)
+			spine_bgp_config = spine_bgp_config + add_to_sping_bgp_config
+
+		add_to_sping_bgp_config = ("""
+   address-family evpn""")
+		spine_bgp_config = spine_bgp_config + add_to_sping_bgp_config
+
+		for leaf in Leafs:
+			Replacements = {
+							"neighbor": leaf['loopback'],
+							"asn": leaf['asn']
+							}
+			add_to_sping_bgp_config = Template("""
+      neighbor $neighbor activate""").safe_substitute(Replacements)
+			spine_bgp_config = spine_bgp_config + add_to_sping_bgp_config
+
+		add_to_sping_bgp_config = ("""
+   address-family ipv4""")
+		spine_bgp_config = spine_bgp_config + add_to_sping_bgp_config
+
+		for leaf in Leafs:
+			Replacements = {
+							"neighbor": leaf['loopback'],
+							"asn": leaf['asn']
+							}
+			add_to_sping_bgp_config = Template("""
+      no neighbor $neighbor activate""").safe_substitute(Replacements)
+			spine_bgp_config = spine_bgp_config + add_to_sping_bgp_config
+
+
 	if debug == "no":
 		spine_bgp_configlet_name = spine_switch['name'] + " BGP configuration"
-		spine_bgp_configlet = cvp.Configlet( spine_bgp_configlet_name , spine_bgp_config )
-		server.addConfiglet( spine_bgp_configlet )
+		if rebuild == 1:
+			updateMyConfiglet( server , spine_bgp_configlet_name , spine_bgp_config )
+		else:
+			spine_bgp_configlet = cvp.Configlet( spine_bgp_configlet_name , spine_bgp_config )
+			server.addConfiglet( spine_bgp_configlet )
 	else:
 		spine_bgp_configlet_name = spine_switch['name'] + " BGP configuration"
 		print "Contents of configlet %s:" % ( spine_bgp_configlet_name )
@@ -329,7 +642,7 @@ router bgp 65000
 		print "!"
 
 
-#
+
 # Build base config configlets for leafs and add them to CVP.
 # Start with config that is the same in all deployment types.
 #
@@ -364,8 +677,7 @@ interface Management1
 						"loopback": leaf['loopback'],
 						"vxlan": leaf['vxlan'],
 						"mgmtip": leaf['mgmt'],
-						"mgmtnetmask": mgmtnetmask,
-						"cvxserver": cvxserver
+						"mgmtnetmask": mgmtnetmask
 						}
 		leaf_config = Template("""
 !
@@ -380,9 +692,6 @@ interface Loopback1
 interface Management1
    ip address $mgmtip/$mgmtnetmask
 !
-management cvx
-   no shutdown
-   server host $cvxserver
 """).safe_substitute(Replacements)
 
 
@@ -391,16 +700,18 @@ management cvx
 						"hostname": leaf['name'],
 						"loopback": leaf['loopback'],
 						"mgmtip": leaf['mgmt'],
-						"mgmtnetmask": mgmtnetmask
+						"mgmtnetmask": mgmtnetmask,
+						"vxlan": leaf['vxlan']
 						}
 		leaf_config = Template("""
 !
 hostname $hostname
 !
-service routing protocols model multi-agent 
-!
 interface Loopback0
    ip address $loopback/32
+!
+interface Loopback1
+   ip address $vxlan/32
 !
 interface Management1
    ip address $mgmtip/$mgmtnetmask
@@ -408,7 +719,7 @@ interface Management1
 """).safe_substitute(Replacements)		
 
 #
-# Create MLAG config when mlag is wanted
+# Create MLAG config when leafs are organised as MLAG pairs.
 #
 
 	if mlag == "yes":
@@ -451,130 +762,113 @@ mlag
 		leaf_config = leaf_config + mlag_add_to_leaf_config
 
 #
-# Create Vxlan1 config based on CVX
+# Create BGP configlets for CVX and HER deployment types.
+# I.e. underlay BGP configlets.
 #
 
-	if deploymenttype == "cvx":
-		Replacements = { "dummy": "dummy"
-						}
-		vxlan_add_to_leaf_config = Template("""
-interface Vxlan1
-   vxlan source-interface Loopback1
-   vxlan udp-port 4789
-   vxlan controller-client
-!
-""").safe_substitute(Replacements)
-		leaf_config = leaf_config + vxlan_add_to_leaf_config
-
-#
-# Create Vxlan1 config based on HER
-#
-
-	if deploymenttype == "her":
-		Replacements = { "dummy": "dummy",
-						"vteplist": vteplist
-						}
-		vxlan_add_to_leaf_config = Template("""
-interface Vxlan1
-   vxlan source-interface Loopback1
-   vxlan udp-port 4789
-   vxlan flood vtep$vteplist
-!
-""").safe_substitute(Replacements)
-		leaf_config = leaf_config + vxlan_add_to_leaf_config
-
-	if deploymenttype == "evpn":
-		Replacements = { "dummy": "dummy"
-						}
-		vxlan_add_to_leaf_config = Template("""
-interface Vxlan1
-   vxlan source-interface Loopback0
-   vxlan udp-port 4789
-!
-""").safe_substitute(Replacements)
-		leaf_config = leaf_config + vxlan_add_to_leaf_config
-
-	if deploymenttype == "her" or deploymenttype == "cvx" and mlag == "no":
-		Replacements = {
-						"routerid": leaf['loopback']
-						}
-		leaf_bgp_config = Template("""
-router bgp 65001
-   router-id $routerid
-   maximum-paths 4
-   neighbor spines peer-group
-   neighbor spines remote-as 65000
-   neighbor spines allowas-in 3
-   neighbor spines ebgp-multihop 4
-   neighbor spines maximum-routes 12000
-   redistribute connected""").safe_substitute(Replacements)
-
-	if deploymenttype == "her" or deploymenttype == "cvx" and mlag == "yes":
+	if (deploymenttype == "her" or deploymenttype == "cvx") and mlag == "no":
 		Replacements = {
 						"routerid": leaf['loopback'],
-						"mlagpeer": leaf['mlagpeer']
-						}
-		leaf_bgp_config = Template("""
-router bgp 65001
-   router-id $routerid
-   maximum-paths 4
-   neighbor spines peer-group
-   neighbor spines remote-as 65000
-   neighbor spines allowas-in 3
-   neighbor spines ebgp-multihop 4
-   neighbor spines maximum-routes 12000
-   neighbor mlag-neighbor peer-group
-   neighbor mlag-neighbor remote-as 65001
-   neighbor mlag-neighbor update-source vlan4094
-   neighbor $mlagpeer peer-group mlag-neighbor
-   redistribute connected""").safe_substitute(Replacements)
-
-	if deploymenttype ==  "evpn" and mlag == "no":
-		Replacements = {
-						"asn": leaf['asn'] ,
-						"routerid": leaf['loopback']
+						"uplinks": uplinks,
+						"asn": leaf['asn'],
+						"spine_asn": spine_start_asn,
+						"max_ecmp": max_ecmp,
+						"max_routes": max_routes
 						}
 		leaf_bgp_config = Template("""
 router bgp $asn
    router-id $routerid
-   maximum-paths 4
+   maximum-paths $max_ecmp ecmp $max_ecmp
+   neighbor spines peer-group
+   neighbor spines remote-as $spine_asn
+   neighbor spines maximum-routes $max_routes
+   redistribute connected""").safe_substitute(Replacements)
+
+	if (deploymenttype == "her" or deploymenttype == "cvx") and mlag == "yes":
+		Replacements = {
+						"routerid": leaf['loopback'],
+						"mlagpeer": leaf['mlagpeer'],
+						"uplinks": uplinks,
+						"asn": leaf['asn'],
+						"spine_asn": spine_start_asn,
+						"max_ecmp": max_ecmp,
+						"max_routes": max_routes
+
+						}
+		leaf_bgp_config = Template("""
+router bgp $asn
+   router-id $routerid
+   maximum-paths $max_ecmp ecmp $max_ecmp
+   neighbor spines peer-group
+   neighbor spines remote-as $spine_asn
+   neighbor spines maximum-routes $max_routes
+   neighbor mlag-neighbor peer-group
+   neighbor mlag-neighbor remote-as $asn
+   neighbor mlag-neighbor update-source vlan4094
+   neighbor $mlagpeer peer-group mlag-neighbor
+   redistribute connected""").safe_substitute(Replacements)
+
+#
+# Create BGP configlets for EVPN deployment types.
+# I.e. underlay and EVPN overlay BGP configlets.
+#
+
+	if deploymenttype ==  "evpn" and mlag == "no":
+		Replacements = {
+						"asn": leaf['asn'] ,
+						"routerid": leaf['loopback'],
+						"uplinks": uplinks,
+						"spine_asn": spine_start_asn,
+						"max_ecmp": max_ecmp,
+						"max_routes": max_routes,
+						"max_evpn_routes": max_evpn_routes
+						}
+		leaf_bgp_config = Template("""
+router bgp $asn
+   router-id $routerid
+   maximum-paths $max_ecmp ecmp $max_ecmp
    neighbor EVPN peer-group
    neighbor EVPN update-source Loopback0
-   neighbor EVPN ebgp-multihop
+   neighbor EVPN ebgp-multihop 4
    neighbor EVPN send-community extended
-   neighbor EVPN maximum-routes 12000 
+   neighbor EVPN fall-over bfd
+   neighbor EVPN maximum-routes $max_routes 
    neighbor spines peer-group
-   neighbor spines remote-as 65000
-   neighbor spines fall-over bfd
-   neighbor spines ebgp-multihop 4
-   neighbor spines maximum-routes 12000""").safe_substitute(Replacements)
+   neighbor spines remote-as $spine_asn
+   neighbor spines maximum-routes $max_evpn_routes""").safe_substitute(Replacements)
 
 	if deploymenttype ==  "evpn" and mlag == "yes":
 		Replacements = {
 						"asn": leaf['asn'] ,
 						"routerid": leaf['loopback'],
-						"mlagpeer": leaf['mlagpeer']
+						"mlagpeer": leaf['mlagpeer'],
+						"uplinks": uplinks,
+						"spine_asn": spine_start_asn,
+						"max_ecmp": max_ecmp,
+						"max_routes": max_routes,
+						"max_evpn_routes": max_evpn_routes
 						}
 		leaf_bgp_config = Template("""
 router bgp $asn
    router-id $routerid
-   maximum-paths 4
+   maximum-paths $max_ecmp ecmp $max_ecmp
    neighbor EVPN peer-group
    neighbor EVPN update-source Loopback0
-   neighbor EVPN ebgp-multihop
+   neighbor EVPN ebgp-multihop 4
    neighbor EVPN send-community extended
-   neighbor EVPN maximum-routes 12000 
+   neighbor EVPN fall-over bfd
+   neighbor EVPN maximum-routes $max_evpn_routes
    neighbor mlag-neighbor peer-group
    neighbor mlag-neighbor remote-as $asn
    neighbor mlag-neighbor update-source vlan4094
    neighbor $mlagpeer peer-group mlag-neighbor
    neighbor spines peer-group
-   neighbor spines remote-as 65000
-   neighbor spines fall-over bfd
-   neighbor spines ebgp-multihop 4
-   neighbor spines maximum-routes 12000""").safe_substitute(Replacements)
+   neighbor spines remote-as $spine_asn
+   neighbor spines maximum-routes $max_routes""").safe_substitute(Replacements)
+
 #
-# Build interface config for each leaf
+# Build interface configlets for each leaf. Add BGP neighbor configuration to
+# BGP configlets.
 #
 
 	for spine_switch in DC:
@@ -612,16 +906,15 @@ interface $interface
 					leaf_bgp_config = leaf_bgp_config + add_to_leaf_bgp_config
 					
 	if deploymenttype == "evpn":
-		for evpnleaf in Leafs:
-			if evpnleaf['loopback'] != leaf['loopback']:
-				Replacements = {
-								"loopback": evpnleaf['loopback'],
-								"asn": evpnleaf['asn']
-								}
-				add_to_leaf_bgp_config = Template("""
+		for evpnleaf in DC:
+			Replacements = {
+							"loopback": evpnleaf['loopback'],
+							"asn": spine_start_asn
+							}
+			add_to_leaf_bgp_config = Template("""
    neighbor $loopback peer-group EVPN
    neighbor $loopback remote-as $asn""").safe_substitute(Replacements)
-				leaf_bgp_config = leaf_bgp_config + add_to_leaf_bgp_config
+			leaf_bgp_config = leaf_bgp_config + add_to_leaf_bgp_config
 
 	if deploymenttype == "evpn":
 	
@@ -630,29 +923,27 @@ interface $interface
 		leaf_bgp_config = leaf_bgp_config + add_to_leaf_bgp_config
 
 	if deploymenttype == "evpn":
-		for evpnleaf in Leafs:
-			if evpnleaf['loopback'] != leaf['loopback']:
-				Replacements = {
-								"loopback": evpnleaf['loopback'],
-								"asn": evpnleaf['asn']
-								}
-				add_to_leaf_bgp_config = Template("""
+		for evpnleaf in DC:
+			Replacements = {
+							"loopback": evpnleaf['loopback'],
+							"asn": spine_start_asn
+							}
+			add_to_leaf_bgp_config = Template("""
       neighbor $loopback activate""").safe_substitute(Replacements)
-				leaf_bgp_config = leaf_bgp_config + add_to_leaf_bgp_config
+			leaf_bgp_config = leaf_bgp_config + add_to_leaf_bgp_config
 
 	if deploymenttype == "evpn":
 		add_to_leaf_bgp_config = """
    address-family ipv4"""
 		leaf_bgp_config = leaf_bgp_config + add_to_leaf_bgp_config
-		for evpnleaf in Leafs:
-			if evpnleaf['loopback'] != leaf['loopback']:
-				Replacements = {
-								"loopback": evpnleaf['loopback'],
-								"asn": evpnleaf['asn']
-								}
-				add_to_leaf_bgp_config = Template("""
+		for evpnleaf in DC:
+			Replacements = {
+							"loopback": evpnleaf['loopback'],
+							"asn": spine_start_asn
+							}
+			add_to_leaf_bgp_config = Template("""
       no neighbor $loopback activate""").safe_substitute(Replacements)
-				leaf_bgp_config = leaf_bgp_config + add_to_leaf_bgp_config
+			leaf_bgp_config = leaf_bgp_config + add_to_leaf_bgp_config
 
 	if deploymenttype == "evpn":
 		add_to_leaf_bgp_config = """
@@ -660,16 +951,25 @@ interface $interface
 		leaf_bgp_config = leaf_bgp_config + add_to_leaf_bgp_config
 
 #
-# Based on all config, create configlets
+# If debug is activated, only print config that should have gone into configlets,
+# do not actually create configlets. If debug is not activated, create configlets
+# and add them to CVP.
 #
 
 	if debug == "no":
 		leaf_configlet_name = leaf['name'] + " configuration"
-		leaf_configlet = cvp.Configlet( leaf_configlet_name , leaf_config )
-		server.addConfiglet( leaf_configlet )
+		if rebuild == 1:
+			updateMyConfiglet ( server , leaf_configlet_name , leaf_config )
+		else:
+			leaf_configlet = cvp.Configlet( leaf_configlet_name , leaf_config )
+			server.addConfiglet( leaf_configlet )
+		
 		leaf_bgp_configlet_name = leaf['name'] + " bgp configuration"
-		leaf_bgp_configlet = cvp.Configlet( leaf_bgp_configlet_name , leaf_bgp_config )
-		server.addConfiglet( leaf_bgp_configlet )
+		if rebuild == 1:
+			updateMyConfiglet ( server , leaf_bgp_configlet_name , leaf_bgp_config )
+		else:
+			leaf_bgp_configlet = cvp.Configlet( leaf_bgp_configlet_name , leaf_bgp_config )
+			server.addConfiglet( leaf_bgp_configlet )		
 	else:
 		leaf_configlet_name = leaf['name'] + " configuration"
 		print "Contents of configlet %s:" % ( leaf_configlet_name )
@@ -684,57 +984,24 @@ interface $interface
 		print "!"
 		print "!"
 
-#
-# Create needed configlets for the new DC
-#
-
-Replacements = {
-                "defaultgw": defaultgw
-                }
-
-dc_base_config = Template("""
-transceiver qsfp default-mode 4x10G
-snmp-server community private rw
-snmp-server community public ro
-!
-spanning-tree mode mstp
-!
-no aaa root
-!
-ip virtual-router mac-address 00:11:22:33:44:55
-!
-ip route 0.0.0.0/0 $defaultgw
-ip routing
-!
-management api http-commands
-   protocol http
-   cors allowed-origin all
-   no shutdown
-""").safe_substitute(Replacements)
-
-if debug == "no":
-	dc_configlet = cvp.Configlet( dc_configlet_name , dc_base_config  )
-	server.addConfiglet( dc_configlet )
-	configlet_list.append( dc_configlet )
-else:
-		print "Contents of configlet %s:" % ( dc_configlet_name )
-		print "%s" % ( dc_base_config )
-		print "!"
-		print "!"
-		print "!"
 
 
 #
-# Create Container structure for new DC
+# If debug is not activated, create Container structure for new DC
 #
 
 if debug == "no":
-	my_dc_container = cvp.Container( name, parentName )
-	server.addContainer( my_dc_container )
-	server.mapConfigletToContainer( my_dc_container , configlet_list )
+	if rebuild == 0:
+		my_dc_container = cvp.Container( name, parentName )
+		server.addContainer( my_dc_container )
+		server.mapConfigletToContainer( my_dc_container , configlet_list )
+		if deploymenttype == "cvx":
+			server.mapConfigletToContainer( my_dc_container , cvx_configlet_list )
 
-	my_leaf_container = cvp.Container( my_leaf_container_name , name )
-	server.addContainer( my_leaf_container )
+		my_leaf_container = cvp.Container( my_leaf_container_name , name )
+		server.addContainer( my_leaf_container )
+		leaf_configlet_list.append( vxlan_configlet )
+		server.mapConfigletToContainer( my_leaf_container , leaf_configlet_list )
 
-	my_spine_container = cvp.Container( my_spine_container_name , name )
-	server.addContainer( my_spine_container )
+		my_spine_container = cvp.Container( my_spine_container_name , name )
+		server.addContainer( my_spine_container )
