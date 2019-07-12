@@ -576,7 +576,7 @@ router bgp $asn
    neighbor EVPN next-hop-unchanged
    neighbor EVPN update-source Loopback0
    neighbor EVPN ebgp-multihop 4
-   neighbor EVPN send-community extended
+   neighbor EVPN send-community
    redistribute connected""").safe_substitute(Replacements)
 
 		for interface in spine_switch['interfaces']:
@@ -830,7 +830,7 @@ router bgp $asn
    neighbor EVPN peer-group
    neighbor EVPN update-source Loopback0
    neighbor EVPN ebgp-multihop 4
-   neighbor EVPN send-community extended
+   neighbor EVPN send-community
    neighbor EVPN fall-over bfd
    neighbor EVPN maximum-routes $max_routes 
    neighbor spines peer-group
@@ -855,7 +855,7 @@ router bgp $asn
    neighbor EVPN peer-group
    neighbor EVPN update-source Loopback0
    neighbor EVPN ebgp-multihop 4
-   neighbor EVPN send-community extended
+   neighbor EVPN send-community
    neighbor EVPN fall-over bfd
    neighbor EVPN maximum-routes $max_evpn_routes
    neighbor mlag-neighbor peer-group
