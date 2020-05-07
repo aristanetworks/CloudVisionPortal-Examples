@@ -1,0 +1,10 @@
+name : device_ping
+args:
+  deviceList: 10.83.30.110,10.83.30.111,10.83.30.112,10.83.30.115
+  targetList: 192.168.50.10,192.168.51.10,192.168.52.10,192.168.53.10
+  passmark: 100
+  failCount: 3
+  pingCount: 5
+  timeout: 1
+  username: username
+  password: password

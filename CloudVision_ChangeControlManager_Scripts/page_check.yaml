@@ -1,0 +1,8 @@
+name: page_check
+args:
+   deviceList: 10.83.30.110,10.83.30.111,10.83.30.112,10.83.30.115
+   pageURL: https://10.83.30.100
+   failCount: 2
+   timeout: 1
+   username: username
+   password: password
