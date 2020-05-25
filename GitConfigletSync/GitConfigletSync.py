@@ -6,27 +6,35 @@ import shutil
 import urllib3
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-# Temp path for where repo will be cloned to (include trailing /)
+DEBUG = 0
+
+# syncFrom can be either cvp or git:
+#  cvp - configlets are sync'd from cvp to the repo over commiting what's in the repo (CVP is the source of truth)
+#  git - configlets are sync'd from git to cvp overwritting what is in CVP (git is the source of truth)
+syncFrom = "git"
+
+# Path for git workspace (include trailing /)
 gitTempPath = '/tmp/GitConfiglets/'
-gitRepo = 'REPOURL'
+gitRepo = 'https://github.com/terensapp/cvpbackup'
 gitBranch = 'master'
-# Relative path within the repo to the configlet directory
-configletPath = 'cvp/configlets/'
-ignoreConfiglets = ['readme.md']
+# Relative path within the repo to the configlet directory, leave blank if they reside in the root
+configletPath = ''
+ignoreConfiglets = ['.git','.md']
 # cvpNodes can be a single item or a list of the cluster
-cvpNodes = ['CVPIP']
-cvpUsername = 'CVPUSER'
-cvpPassword = 'CVPPASS'
+cvpNodes = ['54.193.119.19']
+cvpUsername = 'arista'
+cvpPassword = 'arista'
+
 
 # Initialize the client
-clnt = CvpClient()
+cvpClient = CvpClient()
 
 # Attempt to connect to CVP, if it's not available wait 60 seconds
 attempts = 0
 while 1:
    try: 
-      clnt.connect(cvpNodes, cvpUsername, cvpPassword)
-      if clnt.api.get_cvp_info()['version']:
+      cvpClient.connect(cvpNodes, cvpUsername, cvpPassword)
+      if cvpClient.api.get_cvp_info()['version']:
          break
    except:
       attempts += 1
@@ -45,32 +53,67 @@ def syncConfiglet(cvpClient,configletName,configletConfig):
       configletCurrentDate = configlet['dateTimeInLongFormat']
       # If it does, check to see if the config is in sync, if not update the config with the one in Git
       if configletConfig == configletCurrentConfig:
-        print "Configlet", configletName, "exists and is up to date!"
+        if DEBUG > 4:
+          print "Configlet", configletName, "exists and is up to date!"
       else:
         cvpClient.api.update_configlet(configletConfig,configletKey,configletName)
-        print "Configlet", configletName, "exists and is now up to date"
+        if DEBUG > 4:
+          print "Configlet", configletName, "exists and is now up to date"
      
    except:
       addConfiglet = cvpClient.api.add_configlet(configletName,configletConfig)
-      print "Configlet", configletName, "has been added"
+      if DEBUG > 4:
+        print "Configlet", configletName, "has been added"
 
 ##### End of syncConfiglet
 
-# Download/Update the repo
-try:
-   if os.path.isdir(gitTempPath):
-      shutil.rmtree(gitTempPath)
-   repo = git.Repo.clone_from(gitRepo,gitTempPath,branch=gitBranch)
-except:
-   print "There was a problem downloading the files from the repo"
+def cloneRepo():
+  # Download/Update the repo
+  try:
+     if os.path.isdir(gitTempPath):
+        shutil.rmtree(gitTempPath)
+     repo = git.Repo.clone_from(gitRepo,gitTempPath,branch=gitBranch)
+  except:
+     print "There was a problem downloading the files from the repo"
+#### End of cloneRepo
 
-configlets = os.listdir(gitTempPath + configletPath)
+def syncFromGit(cvpClient):
+  cloneRepo()
 
-for configletName in configlets:
-   if configletName not in ignoreConfiglets:
-      with open(gitTempPath + configletPath + configletName, 'r') as configletData:
-         configletConfig=configletData.read()
-      syncConfiglet(clnt,configletName,configletConfig)
+  configlets = os.listdir(gitTempPath + configletPath)
 
-if os.path.isdir(gitTempPath):
-   shutil.rmtree(gitTempPath)
+  for configletName in configlets:
+     if configletName not in ignoreConfiglets and not configletName.endswith(tuple(ignoreConfiglets)):
+        with open(gitTempPath + configletPath + configletName, 'r') as configletData:
+           configletConfig=configletData.read()
+        syncConfiglet(cvpClient,configletName,configletConfig)
+
+  if os.path.isdir(gitTempPath):
+     shutil.rmtree(gitTempPath)
+#### End of SyncFromGit
+
+def syncFromCVP(cvpClient):
+  cloneRepo()
+  repo = git.Repo(gitTempPath)
+
+  for configlet in cvpClient.api.get_configlets()['data']:
+    file = open(gitTempPath + configlet['name'],"w")
+    file.write(configlet['config'])
+    file.close()
+    repo.index.add([configlet['name']])
+
+  repo.git.add(update=True)
+  repo.index.commit("Syncing repo with CVP")
+  repo.git.push("origin")
+#### End of syncFromCVP
+
+if syncFrom == 'cvp':
+  print "Syncing configlets from CVP to git repo"
+  syncFromCVP(cvpClient)
+  print "Completed successfully"
+elif syncFrom == 'git':
+  print "Syncing configlets from git repo to CVP"
+  syncFromGit(cvpClient)
+  print "Completed successfully"
+else:
+  print "Invalid sync option"
